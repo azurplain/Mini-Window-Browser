@@ -1,13 +1,9 @@
 ﻿// ===========================================================================
-// 项目名称：小窗 (LiteBrowser) - Final Release v1.0
+// 项目名称：小窗 (LiteBrowser) - v1.1 Dev (BugFix)
 // 作者：Gemini & User
-// 项目描述：专为游戏玩家设计的轻量级副屏浏览器。
-// 
-// [核心特性]
-// 1. 多标签页系统：自绘UI，带关闭按钮(×)，标题记忆与恢复。
-// 2. 沉浸式模式：一键隐藏所有UI，智能边缘吸附，鼠标/点击完全穿透。
-// 3. 智能热键：打字时自动屏蔽热键，防止误触；老板键一键隐藏并暂停。
-// 4. 个性化设置：自定义默认主页，自定义圆角与吸附距离。
+// 更新日志：
+//   - [修复] 修复老板键隐藏窗口时，WebView2 画面残留/位置不同步的 Bug (Ghost Window)。
+//   - [优化] 显式控制 WebView2 的 IsVisible 属性，确保隐藏彻底。
 // ===========================================================================
 
 #define WIN32_LEAN_AND_MEAN
@@ -20,18 +16,15 @@
 #include <vector>
 #include <cmath>
 #include <cstdio>
-#include <commctrl.h> // 通用控件库(用于TabControl)
+#include <commctrl.h> 
 
-// WebView2 & WIL
 #include <wrl.h>
 #include <wil/com.h>
 #include <wil/resource.h>
 #include "WebView2.h"
 
-// 包含 Shell 辅助函数
 #include <shlobj.h> 
 
-// 链接依赖库
 #pragma comment(lib, "shlwapi.lib")
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
@@ -44,69 +37,64 @@ using namespace Microsoft::WRL;
 //  数据结构与常量
 // =============================================================
 
-// 热键配置结构
 struct AppHotkey {
-    int id;             // 唯一ID
-    UINT fsModifiers;   // 修饰键 (MOD_CONTROL等)
-    UINT vk;            // 虚拟键码
-    std::wstring name;  // 用于UI显示的名称
+    int id;
+    UINT fsModifiers;
+    UINT vk;
+    std::wstring name;
 };
 
-// 标签页数据
 struct TabData {
-    std::wstring title; // 网页原始标题
-    std::wstring url;   // 当前URL
+    std::wstring title;
+    std::wstring url;
 };
 
-// UI 布局常量
-const int DRAG_BAR_HEIGHT = 12; // 顶部拖拽条高度
-const int TAB_BAR_HEIGHT = 28;  // 标签栏高度
-const int NAV_BAR_HEIGHT = 30;  // 地址栏高度
-const int TOTAL_TOP_HEIGHT = DRAG_BAR_HEIGHT + TAB_BAR_HEIGHT + NAV_BAR_HEIGHT; // 总头部高度
-const int TAB_WIDTH = 140;      // 标签页固定宽度
+const int DRAG_BAR_HEIGHT = 12;
+const int TAB_BAR_HEIGHT = 28;
+const int NAV_BAR_HEIGHT = 30;
+const int TOTAL_TOP_HEIGHT = DRAG_BAR_HEIGHT + TAB_BAR_HEIGHT + NAV_BAR_HEIGHT;
+const int TAB_WIDTH = 140;
 
 // =============================================================
 //  全局变量
 // =============================================================
 
 HINSTANCE g_hInst;
-HWND g_hWnd;            // 主窗口
-HWND g_hEditUrl;        // 地址输入框
-HWND g_hBtnGo;          // 跳转按钮
-HWND g_hBtnSet;         // 设置按钮
-HWND g_hBtnMove;        // 顶部拖拽把手
-HWND g_hTabCtrl;        // 标签页控件
-HWND g_hBtnAddTab;      // [+] 按钮
-HWND g_hBtnCloseTab;    // [-] 按钮(备用)
-HWND g_hChkAutoPause;   // 自动暂停复选框
-HWND g_hEditHome;       // [新增] 默认主页输入框
+HWND g_hWnd;
+HWND g_hEditUrl;
+HWND g_hBtnGo;
+HWND g_hBtnSet;
+HWND g_hBtnMove;
+HWND g_hTabCtrl;
+HWND g_hBtnAddTab;
+HWND g_hBtnCloseTab;
+HWND g_hChkAutoPause;
+HWND g_hEditHome;
 
-WNDPROC g_OldBtnProc;   // 拖拽按钮的原过程函数
+WNDPROC g_OldBtnProc;
 
-// WebView2 核心指针
 wil::com_ptr<ICoreWebView2Controller> g_controller;
 wil::com_ptr<ICoreWebView2> g_webview;
 
 // --- 状态标志 ---
-bool g_isImmersionMode = false;     // 是否沉浸模式
-bool g_isWindowHidden = false;      // 是否被老板键隐藏
-bool g_areHotkeysDisabled = false;  // 热键是否因打字临时禁用
-bool g_autoPauseOnHide = true;      // [设置] 隐藏时是否自动暂停视频
+bool g_isImmersionMode = false;
+bool g_isWindowHidden = false;
+bool g_areHotkeysDisabled = false;
+bool g_autoPauseOnHide = true;
 
 // --- 配置参数 ---
-int g_holeRadius = 400;             // 挖孔半径
-int g_snapThreshold = 20;           // 吸附阈值
-std::wstring g_homeUrl = L"https://www.bilibili.com"; // [新增] 默认主页
+int g_holeRadius = 400;
+int g_snapThreshold = 20;
+std::wstring g_homeUrl = L"https://www.bilibili.com";
 
 // --- 标签页状态 ---
 std::vector<TabData> g_tabs;
 int g_currentTabIndex = 0;
-bool g_isNavigatingFromTabSwitch = false; // 抑制标签切换时的URL更新事件
+bool g_isNavigatingFromTabSwitch = false;
 
 // --- 窗口位置记忆 ---
 int g_winX = 100; int g_winY = 100; int g_winW = 1000; int g_winH = 600;
 
-// --- 配置文件路径 ---
 TCHAR g_iniPath[MAX_PATH] = { 0 };
 
 // --- 控件 ID ---
@@ -118,11 +106,10 @@ TCHAR g_iniPath[MAX_PATH] = { 0 };
 #define IDC_ADD_TAB     9006
 #define IDC_CLOSE_TAB   9007
 
-// 设置窗口控件 ID
 #define IDC_SET_RADIUS    9101
 #define IDC_SET_SNAP      9102
 #define IDC_CHK_AUTOPAUSE 9103
-#define IDC_EDIT_HOME     9104 // [新增]
+#define IDC_EDIT_HOME     9104 
 #define IDC_BTN_HK1       9111
 #define IDC_BTN_HK2       9112
 #define IDC_BTN_HK3       9113
@@ -172,7 +159,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 //  核心逻辑实现
 // =============================================================
 
-// 显示带错误码的弹窗
 void ShowErrorBox(HWND hWnd, LPCWSTR title, LPCWSTR msg, HRESULT hr) {
     WCHAR buffer[1024];
     if (hr != S_OK) {
@@ -184,7 +170,6 @@ void ShowErrorBox(HWND hWnd, LPCWSTR title, LPCWSTR msg, HRESULT hr) {
     MessageBox(hWnd, buffer, title, MB_ICONERROR | MB_OK);
 }
 
-// 自动获取管理员权限
 void CheckAndRestartAsAdmin(HINSTANCE hInstance) {
     if (IsUserAnAdmin()) return;
     TCHAR szFileName[MAX_PATH];
@@ -227,7 +212,6 @@ std::wstring GetHotkeyString(UINT mod, UINT vk) {
     return str;
 }
 
-// [核心] 保存配置
 void SaveConfig() {
     TCHAR buffer[32];
     _itot_s(g_holeRadius, buffer, 10);
@@ -236,11 +220,8 @@ void SaveConfig() {
     WritePrivateProfileString(_T("Settings"), _T("SnapThreshold"), buffer, g_iniPath);
     _itot_s(g_autoPauseOnHide ? 1 : 0, buffer, 10);
     WritePrivateProfileString(_T("Settings"), _T("AutoPause"), buffer, g_iniPath);
-
-    // [新增] 保存主页
     WritePrivateProfileString(_T("Settings"), _T("HomeUrl"), g_homeUrl.c_str(), g_iniPath);
 
-    // 保存会话 (Session)
     _itot_s(g_currentTabIndex, buffer, 10);
     WritePrivateProfileString(_T("Session"), _T("ActiveTab"), buffer, g_iniPath);
     _itot_s((int)g_tabs.size(), buffer, 10);
@@ -253,7 +234,6 @@ void SaveConfig() {
         WritePrivateProfileString(_T("Session"), keyTitle.c_str(), g_tabs[i].title.c_str(), g_iniPath);
     }
 
-    // 保存窗口位置
     if (g_hWnd && !IsIconic(g_hWnd) && !g_isWindowHidden) {
         RECT rc; GetWindowRect(g_hWnd, &rc);
         if (g_isImmersionMode) {
@@ -286,7 +266,6 @@ void LoadConfig() {
     g_snapThreshold = GetPrivateProfileInt(_T("Settings"), _T("SnapThreshold"), 20, g_iniPath);
     g_autoPauseOnHide = GetPrivateProfileInt(_T("Settings"), _T("AutoPause"), 1, g_iniPath) != 0;
 
-    // [新增] 读取主页
     TCHAR homeBuf[2048];
     GetPrivateProfileString(_T("Settings"), _T("HomeUrl"), L"https://www.bilibili.com", homeBuf, 2048, g_iniPath);
     g_homeUrl = homeBuf;
@@ -322,14 +301,10 @@ void UnregisterAllHotkeys(HWND hWnd) {
 
 void UpdateHotkeysState(HWND hWnd) {
     UnregisterAllHotkeys(hWnd);
-
-    // 如果窗口隐藏，只注册唤醒键
     if (g_isWindowHidden) {
         RegisterHotKey(hWnd, g_hkHideWin.id, g_hkHideWin.fsModifiers, g_hkHideWin.vk);
         return;
     }
-
-    // 正常状态注册所有键
     RegisterHotKey(hWnd, g_hkImmersion.id, g_hkImmersion.fsModifiers, g_hkImmersion.vk);
     RegisterHotKey(hWnd, g_hkHideWin.id, g_hkHideWin.fsModifiers, g_hkHideWin.vk);
     RegisterHotKey(hWnd, g_hkPlayPause.id, g_hkPlayPause.fsModifiers, g_hkPlayPause.vk);
@@ -343,7 +318,6 @@ void ExecuteScript(const std::wstring& script) {
     if (g_webview) g_webview->ExecuteScript(script.c_str(), nullptr);
 }
 
-// 检测用户是否正在输入 (I型光标)
 bool IsUserTyping() {
     CURSORINFO ci = { 0 };
     ci.cbSize = sizeof(CURSORINFO);
@@ -363,16 +337,17 @@ LRESULT CALLBACK DragButtonProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     return CallWindowProc(g_OldBtnProc, hWnd, uMsg, wParam, lParam);
 }
 
-// ================= 标签页管理逻辑 =================
+// =============================================================
+//  标签页管理逻辑
+// =============================================================
 
-// [核心] 格式化标题：智能截断 + 强制保留关闭按钮
 std::wstring FormatTabTitle(const std::wstring& rawTitle) {
     std::wstring out = rawTitle;
     const size_t MAX_LEN = 10;
     if (out.length() > MAX_LEN) {
         out = out.substr(0, MAX_LEN) + L"..";
     }
-    out += L"　×"; // 使用全角空格增加点击区域区分度
+    out += L"　×";
     return out;
 }
 
@@ -396,7 +371,6 @@ void CreateNewTab(LPCWSTR url, LPCWSTR title, bool switchToNew) {
 void CloseTab(int index) {
     if (index < 0 || index >= g_tabs.size()) return;
 
-    // 如果是最后一个标签，重置为默认主页
     if (g_tabs.size() == 1) {
         g_tabs[0].url = g_homeUrl;
         g_tabs[0].title = L"New Tab";
@@ -444,7 +418,6 @@ void UpdateTabTitle(int index, LPCWSTR title) {
     InvalidateRect(g_hTabCtrl, NULL, TRUE);
 }
 
-// 处理标签点击
 void HandleTabClick(LPARAM lParam) {
     LPNMHDR pnm = (LPNMHDR)lParam;
     if (pnm->code == NM_CLICK && pnm->idFrom == IDC_TAB_CTRL) {
@@ -458,7 +431,6 @@ void HandleTabClick(LPARAM lParam) {
         if (idx != -1) {
             RECT rc;
             TabCtrl_GetItemRect(g_hTabCtrl, idx, &rc);
-            // 判定右侧 25px 区域为关闭按钮
             if (pt.x > rc.right - 25) {
                 CloseTab(idx);
             }
@@ -489,12 +461,10 @@ LRESULT CALLBACK SettingsWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         SetWindowText(hSnapEdit, std::to_wstring(g_snapThreshold).c_str());
         y += 35;
 
-        // [新增] 自动暂停
         g_hChkAutoPause = CreateWindow(L"BUTTON", L"老板键隐藏时自动暂停视频", WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 20, y, 250, 20, hDlg, (HMENU)IDC_CHK_AUTOPAUSE, g_hInst, NULL);
         SendMessage(g_hChkAutoPause, BM_SETCHECK, g_autoPauseOnHide ? BST_CHECKED : BST_UNCHECKED, 0);
         y += 30;
 
-        // [新增] 默认主页
         CreateWindow(L"STATIC", L"默认主页:", WS_CHILD | WS_VISIBLE, 20, y, 80, 20, hDlg, NULL, g_hInst, NULL);
         g_hEditHome = CreateWindow(L"EDIT", g_homeUrl.c_str(), WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, y, 200, 20, hDlg, (HMENU)IDC_EDIT_HOME, g_hInst, NULL);
         y += 35;
@@ -502,7 +472,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         auto CreateKeyBtn = [&](LPCWSTR title, int id) {
             CreateWindow(L"STATIC", title, WS_CHILD | WS_VISIBLE, 20, y, 120, 20, hDlg, NULL, g_hInst, NULL);
             HWND h = CreateWindow(L"BUTTON", L"...", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 150, y, 150, 25, hDlg, (HMENU)id, g_hInst, NULL);
-            y += 40; // 自动增加Y坐标
+            y += 40;
             return h;
             };
         hBtnHk1 = CreateKeyBtn(L"沉浸模式开关:", IDC_BTN_HK1);
@@ -532,7 +502,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             else if (id == IDC_SET_SNAP) { GetWindowText(hSnapEdit, buf, 10); g_snapThreshold = _wtoi(buf); }
             else if (id == IDC_EDIT_HOME) {
                 GetWindowText(g_hEditHome, buf, 2048);
-                g_homeUrl = buf; // 实时更新主页变量
+                g_homeUrl = buf;
             }
         }
         else if (id == IDC_CHK_AUTOPAUSE) {
@@ -586,7 +556,6 @@ void OpenSettingsWindow(HWND hParent) {
     WNDCLASS wc = { 0 }; wc.lpfnWndProc = SettingsWndProc; wc.hInstance = g_hInst;
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1); wc.lpszClassName = L"XiaoChuangSettings";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW); RegisterClass(&wc);
-    // 增加高度适配新控件
     HWND hSettings = CreateWindowEx(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST, L"XiaoChuangSettings", L"小窗设置",
         WS_VISIBLE | WS_SYSMENU | WS_CAPTION, 200, 200, 350, 520, hParent, NULL, g_hInst, NULL);
     EnableWindow(hParent, FALSE);
@@ -612,7 +581,6 @@ void UpdateImmersionHole() {
     DeleteObject(hRgnFull); DeleteObject(hRgnHole);
 }
 
-// [核心修正] 消除底部白边：WebView高度铺满到底部
 void ResizeLayout(HWND hWnd) {
     RECT rc; GetClientRect(hWnd, &rc);
     int width = rc.right - rc.left;
@@ -642,7 +610,7 @@ void ResizeLayout(HWND hWnd) {
             webViewBounds = { 0, 0, width, height };
         }
         else {
-            // [修正] bottom = height (铺满窗口底部，无缝隙)
+            // [修复] 铺满窗口底部，防止白边
             webViewBounds = { 0, TOTAL_TOP_HEIGHT, width, height };
         }
         g_controller->put_Bounds(webViewBounds);
@@ -687,7 +655,6 @@ void InitWebView2(HWND hWnd) {
                                         wil::unique_cotaskmem_string uri;
                                         args->get_Uri(&uri);
                                         args->put_Handled(TRUE);
-                                        // [优化] 新窗口使用自定义主页(如果URL为空)或者目标URL
                                         std::wstring targetUrl = uri.get();
                                         if (targetUrl.empty()) targetUrl = g_homeUrl;
                                         CreateNewTab(targetUrl.c_str(), L"New Tab", true);
@@ -717,7 +684,6 @@ void InitWebView2(HWND hWnd) {
                                         return S_OK;
                                     }).Get(), nullptr);
 
-                            // 恢复会话
                             int savedTabCount = GetPrivateProfileInt(_T("Session"), _T("TabCount"), 0, g_iniPath);
                             int savedActiveTab = GetPrivateProfileInt(_T("Session"), _T("ActiveTab"), 0, g_iniPath);
 
@@ -734,7 +700,6 @@ void InitWebView2(HWND hWnd) {
                                 SwitchToTab(savedActiveTab);
                             }
                             else {
-                                // [优化] 首次启动使用自定义主页
                                 CreateNewTab(g_homeUrl.c_str(), L"Home", true);
                             }
 
@@ -767,7 +732,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
 
         g_OldBtnProc = (WNDPROC)SetWindowLongPtr(g_hBtnMove, GWLP_WNDPROC, (LONG_PTR)DragButtonProc);
 
-        // 自绘标签页
         g_hTabCtrl = CreateWindow(WC_TABCONTROL, L"", WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TCS_FIXEDWIDTH | TCS_OWNERDRAWFIXED, 0, 0, 0, 0, hWnd, (HMENU)IDC_TAB_CTRL, g_hInst, NULL);
         SendMessage(g_hTabCtrl, WM_SETFONT, (WPARAM)GetStockObject(DEFAULT_GUI_FONT), TRUE);
         SendMessage(g_hTabCtrl, TCM_SETITEMSIZE, 0, MAKELPARAM(TAB_WIDTH, 26));
@@ -783,7 +747,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         UpdateHotkeysState(hWnd);
         break;
 
-        // 自绘标签页 (显示固定 x)
     case WM_DRAWITEM: {
         LPDRAWITEMSTRUCT pDis = (LPDRAWITEMSTRUCT)lParam;
         if (pDis->CtlID == IDC_TAB_CTRL) {
@@ -858,7 +821,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             SetFocus(hWnd);
         }
         else if (LOWORD(wParam) == IDC_SET_BUTTON) OpenSettingsWindow(hWnd);
-        // [优化] 点击+号打开默认主页
         else if (LOWORD(wParam) == IDC_ADD_TAB) CreateNewTab(g_homeUrl.c_str(), L"New Tab", true);
         else if (LOWORD(wParam) == IDC_CLOSE_TAB) CloseCurrentTab();
         break;
@@ -900,13 +862,22 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
+        // [核心修复] 老板键隐藏逻辑：显式控制 WebView 可见性，防止画面残留
     case WM_HOTKEY: {
         if (IsUserTyping() || (GetFocus() == g_hEditUrl)) break;
 
         if (wParam == g_hkHideWin.id) {
             g_isWindowHidden = !g_isWindowHidden;
+
+            // 1. 显式开关渲染，解决Ghost Window问题
+            if (g_controller) {
+                g_controller->put_IsVisible(!g_isWindowHidden);
+            }
+
+            // 2. 隐藏/显示主窗口
             ShowWindow(hWnd, g_isWindowHidden ? SW_HIDE : SW_SHOW);
-            // 自动暂停
+
+            // 3. 执行自动暂停
             if (g_isWindowHidden && g_autoPauseOnHide) {
                 ExecuteScript(L"document.querySelector('video').pause();");
             }
@@ -932,7 +903,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 SetWindowLongPtr(hWnd, GWL_EXSTYLE, exStyle | WS_EX_LAYERED | WS_EX_TRANSPARENT);
                 SetLayeredWindowAttributes(hWnd, 0, 255, LWA_ALPHA);
 
-                // 沉浸位移
                 int newY = 0;
                 if (abs(rc.top) < g_snapThreshold) {
                     newY = 0;
@@ -947,7 +917,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
                 SetWindowLong(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_THICKFRAME);
                 SetWindowLongPtr(hWnd, GWL_EXSTYLE, exStyle & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT));
 
-                // 还原位移
                 int newY = rc.top;
                 if (rc.top > 0) {
                     newY = rc.top - TOTAL_TOP_HEIGHT;

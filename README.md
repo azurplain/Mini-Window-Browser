@@ -26,7 +26,7 @@
 
 ## 🛠️ 安装与运行
 
-点击release/发行版，下载1.2的预发行版本，由于代码量激增，尚未进行详细的bug测试和稳定优化，使用过程如有问题请及时反馈，如无书签和预设需求，可选择更加稳定的1.1版本。
+点击release/发行版，下载1.2的正式版本。
 https://github.com/azurplain/Mini-Window-Browser/releases
 
 ### 1. 环境要求

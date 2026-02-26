@@ -8,7 +8,6 @@
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?logo=windows)](https://github.com/3118739085/Mini-Window-Browser)
 [![WebView2](https://img.shields.io/badge/engine-WebView2-00a4ef?logo=microsoftedge)](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/)
 [![C++](https://img.shields.io/badge/language-C%2B%2B%20%2F%20Win32-00599c?logo=cplusplus)](https://github.com/3118739085/Mini-Window-Browser)
-[![License](https://img.shields.io/badge/license-MIT-green)](#许可证)
 
 边玩游戏边刷视频，挂机摸鱼两不误。
 

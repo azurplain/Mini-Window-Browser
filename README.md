@@ -1,35 +1,37 @@
 <div align="center">
 
-# ?? 小窗 · Mini-Window-Browser
+# Mini-Window-Browser
 
-**专为单屏玩家打造的 Windows 画中画浏览器**
+**专为单屏玩家打造的超轻量级 Windows 画中画浏览器**
 
-[![Version](https://img.shields.io/badge/version-1.3-blue.svg)](https://github.com/3118739085/Mini-Window-Browser/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?logo=windows)](https://github.com/3118739085/Mini-Window-Browser)
+[![Version](https://img.shields.io/badge/version-1.3-blue.svg)](https://github.com/azurplain/Mini-Window-Browser/releases)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?logo=windows)](https://github.com/azurplain/Mini-Window-Browser)
 [![WebView2](https://img.shields.io/badge/engine-WebView2-00a4ef?logo=microsoftedge)](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/)
-[![C++](https://img.shields.io/badge/language-C%2B%2B%20%2F%20Win32-00599c?logo=cplusplus)](https://github.com/3118739085/Mini-Window-Browser)
+[![C++](https://img.shields.io/badge/language-C%2B%2B%20%2F%20Win32-00599c?logo=cplusplus)](https://github.com/azurplain/Mini-Window-Browser)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+
 边玩游戏边刷视频，挂机摸鱼两不误。
 
-[**下载**](https://github.com/3118739085/Mini-Window-Browser/releases) · [**用户手册**](用户手册.md) · [**问题反馈**](https://github.com/3118739085/Mini-Window-Browser/issues)
+[**下载**](https://github.com/azurplain/Mini-Window-Browser/releases) · [**用户手册**](用户手册.md) · [**问题反馈**](https://github.com/azurplain/Mini-Window-Browser/issues)
 
 </div>
 
 ---
 
-## ? 功能亮点
+## ✨ 功能亮点
 
 <table>
 <tr>
 <td width="50%">
 
-### ??? 沉浸式挖孔穿透
+### 🕳️ 沉浸式挖孔穿透
 
 进入沉浸模式后，窗口边框消失，屏幕上只保留一个**跟随鼠标的圆形区域**显示视频内容，其余区域完全透明且**鼠标点击穿透**——你可以隔着浏览器操作游戏，互不干扰。
 
 </td>
 <td width="50%">
 
-### ?? 整体透明模式
+### 👻 整体透明模式
 
 另一种沉浸风格：鼠标移入窗口时自动完全隐藏，移出后恢复显示。适合需要完整查看视频画面的场景，操作底层应用时画面自动让路。
 
@@ -38,14 +40,14 @@
 <tr>
 <td>
 
-### ?? 场景预设 · 一键切换
+### 🎯 场景预设 · 一键切换
 
 保存窗口位置、大小、挖孔半径、热键配置、当前网址等**全部状态**为预设。不同游戏、不同场景，一键还原布局。
 
 </td>
 <td>
 
-### ?? 老板键
+### 🔑 老板键
 
 一键隐藏/显示窗口，支持自动暂停视频。隐藏后除老板键外的所有热键自动注销，避免误触。藏得快，收得稳。
 
@@ -54,14 +56,14 @@
 <tr>
 <td>
 
-### ?? 多标签 & 书签管理
+### 📑 多标签 & 书签管理
 
 轻量级多标签浏览，自绘标签栏带内嵌关闭按钮。一键收藏网页，书签支持行内编辑 URL 和标题。
 
 </td>
 <td>
 
-### ??? 鼠标按键绑定
+### 🖱️ 鼠标按键绑定
 
 所有热键支持绑定为**鼠标中键**或**侧键**，通过低级鼠标钩子实现全局捕获，全屏游戏中同样生效。
 
@@ -71,13 +73,13 @@
 
 ---
 
-## ?? 界面一览
+## 📸 界面一览
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  [拖拽条]                  [?]                       │ ← 拖拽区域（悬停中央显示移动手柄）
+│  [拖拽条]                  [✥]                       │ ← 拖拽区域（悬停中央显示移动手柄）
 │  [标签页1] [标签页2] ...      [+] [-] [□] [×]       │ ← 标签栏
-│  [地址栏_____________] [☆][?][Go] [预设] [设置]     │ ← 导航栏
+│  [地址栏_____________] [☆][⌵][Go] [预设] [设置]     │ ← 导航栏
 ├─────────────────────────────────────────────────────┤
 │                                                     │
 │                     网 页 内 容                       │
@@ -87,7 +89,7 @@
 
 ---
 
-## ?? 快速开始
+## 🚀 快速开始
 
 ### 环境要求
 
@@ -98,17 +100,17 @@
 
 ### 下载运行
 
-1. 前往 [Releases](https://github.com/3118739085/Mini-Window-Browser/releases) 下载最新版压缩包
+1. 前往 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases) 下载最新版压缩包
 2. 解压后确保 `XiaoChuang.exe` 和 `WebView2Loader.dll` 在同一目录
 3. **右键 → 以管理员身份运行**
 
-> ?? **为什么需要管理员权限？** 全屏游戏通常拥有较高权限，小窗需要同等权限才能在游戏中正常拦截热键。拒绝提权后仍可运行，但全屏游戏中热键可能失效。
+> ⚠️ **为什么需要管理员权限？** 全屏游戏通常拥有较高权限，小窗需要同等权限才能在游戏中正常拦截热键。拒绝提权后仍可运行，但全屏游戏中热键可能失效。
 
 首次运行会自动生成 `config.ini` 配置文件，所有设置、书签、预设均存储于此。
 
 ---
 
-## ?? 默认快捷键
+## ⌨️ 默认快捷键
 
 | 按键 | 功能 | 说明 |
 |:---:|---|---|
@@ -118,16 +120,16 @@
 | `5` / `6` | 后退 / 快进 | ±5 秒 |
 | `7` / `8` | 上一集 / 下一集 | 适配 B站合集 |
 
-> ?? 所有热键均可在设置中自定义，支持 `Ctrl` / `Shift` / `Alt` 组合键及鼠标中键/侧键。
+> 💡 所有热键均可在设置中自定义，支持 `Ctrl` / `Shift` / `Alt` 组合键及鼠标中键/侧键。
 >
-> ?? 在网页输入框中打字时热键自动禁用，防止误触。
+> 💡 在网页输入框中打字时热键自动禁用，防止误触。
 
 ---
 
-## ?? 功能详情
+## 🧩 功能详情
 
 <details>
-<summary><b>??? 沉浸模式 — 两种风格对比</b></summary>
+<summary><b>🕳️ 沉浸模式 — 两种风格对比</b></summary>
 
 <br>
 
@@ -143,39 +145,39 @@
 </details>
 
 <details>
-<summary><b>?? 场景预设系统</b></summary>
+<summary><b>🎯 场景预设系统</b></summary>
 
 <br>
 
 预设保存的完整状态：
 
-> 窗口位置/大小 · 全屏状态 · 挖孔半径 · 吸附距离 · 沉浸风格 · 自动暂停开关 · 热键禁用设置 · 托盘模式 · 默认主页 · 当前网址 · 全部7个热键绑定
+> 窗口位置/大小 · 全屏状态 · 挖孔半径 · 吸附距离 · 沉浸风格 · 自动暂停开关 · 热键禁用设置 · 托盘模式 · 默认主页 · 当前网址 · 全部 7 个热键绑定
 
 操作方式：
 - **[+ 新建预设]**：保存当前状态（自动检测重名）
-- **[?]**：一键应用预设
+- **[➜]**：一键应用预设
 - **直接编辑名称**：关闭窗口时自动保存
-- **[??]**：删除预设
-- **[? 还原默认状态]**：重置为初始设置
+- **[🗑]**：删除预设
+- **[↺ 还原默认状态]**：重置为初始设置
 
 > 预设不保存书签数据，书签是全局共享的。
 
 </details>
 
 <details>
-<summary><b>?? 书签收藏系统</b></summary>
+<summary><b>📑 书签收藏系统</b></summary>
 
 <br>
 
 - 点击 **☆** 一键收藏/取消收藏（URL 去尾斜杠 + 忽略大小写匹配）
-- 点击 **?** 打开书签管理下拉列表
+- 点击 **⌵** 打开书签管理下拉列表
 - 支持行内编辑 URL 和标题，修改即时保存
 - 点击列表外区域自动关闭
 
 </details>
 
 <details>
-<summary><b>??? 更多功能</b></summary>
+<summary><b>🖥️ 更多功能</b></summary>
 
 <br>
 
@@ -193,7 +195,7 @@
 
 ---
 
-## ?? 高级配置
+## ⚙️ 高级配置
 
 软件会在同目录下自动生成 `config.ini`，支持在软件内设置面板修改，也可手动编辑：
 
@@ -216,7 +218,7 @@ PlayPause=0,192       ; 波浪号 `
 
 ---
 
-## ?? 从源码构建
+## 🔧 从源码构建
 
 ### 前置依赖
 
@@ -228,10 +230,10 @@ PlayPause=0,192       ; 波浪号 `
 ### 构建步骤
 
 ```bash
-git clone https://github.com/3118739085/Mini-Window-Browser.git
+git clone https://github.com/azurplain/Mini-Window-Browser.git
 ```
 
-1. 用 Visual Studio 打开 `小窗.sln`
+1. 用 Visual Studio 打开解决方案
 2. 等待 NuGet 包自动还原
 3. 选择 `Release | x64` 配置
 4. **生成 → 生成解决方案**（`Ctrl+Shift+B`）
@@ -241,7 +243,7 @@ git clone https://github.com/3118739085/Mini-Window-Browser.git
 
 ```
 小窗/
-├── 小窗.cpp          # 全部源代码（单文件 ~2000 行）
+├── 小窗.cpp          # 全部源代码（单文件）
 ├── 小窗.vcxproj      # 项目文件
 ├── 小窗.rc           # 资源文件
 ├── Resource.h        # 资源 ID 定义
@@ -253,11 +255,11 @@ git clone https://github.com/3118739085/Mini-Window-Browser.git
 
 ---
 
-## ?? 更新日志
+## 📋 更新日志
 
 ### v1.3（当前版本）
 
-**?? Bug 修复**
+**🐛 Bug 修复**
 - 修复整体透明沉浸模式重入时透明度状态异常
 - 修复网页标题变更回调的空指针崩溃风险
 - 修复挖孔穿透在窗口句柄未初始化时的未定义行为
@@ -265,23 +267,23 @@ git clone https://github.com/3118739085/Mini-Window-Browser.git
 - 修复关闭标签页后配置文件残留脏数据
 - 修复书签/预设列表滚动条 1 像素偏差
 
-**? 性能优化**
+**⚡ 性能优化**
 - 挖孔模式光标位置缓存，鼠标静止时跳过冗余 GDI 操作
 - DPI 感知初始化前移，适配高 DPI 显示器
 - 弹窗窗口类一次性注册，减少冗余系统调用
 
 ### v1.2
 
-- ? 新增场景预设系统
-- ? 新增书签收藏功能
-- ? 新增整体透明沉浸模式
-- ? 新增系统托盘支持
-- ? 新增鼠标按键热键绑定
-- ? 新增全屏模式
+- 新增场景预设系统
+- 新增书签收藏功能
+- 新增整体透明沉浸模式
+- 新增系统托盘支持
+- 新增鼠标按键热键绑定
+- 新增全屏模式
 
 ### v1.1
 
-- ?? 初始版本
+- 初始版本
 - 挖孔穿透沉浸模式
 - 全局热键控制
 - 多标签浏览
@@ -290,17 +292,21 @@ git clone https://github.com/3118739085/Mini-Window-Browser.git
 
 ---
 
-## ?? 文档
+## 📖 文档
 
 完整的使用说明、设置指南和 FAQ 请参阅 **[用户手册](用户手册.md)**。
 
 ---
 
-## ?? 贡献
+## 🤝 贡献
 
 欢迎提交 [Issue](https://github.com/azurplain/Mini-Window-Browser/issues) 和 [Pull Request](https://github.com/azurplain/Mini-Window-Browser/pulls)！
 
 ---
+
+## 📄 许可证
+
+本项目基于 [GPL-3.0 License](LICENSE) 开源。
 
 ## 许可证
 

@@ -626,6 +626,15 @@ void SaveConfig() {
         _itot_s(rc.right - rc.left, buffer, 10); WritePrivateProfileString(_T("Session"), _T("WinW"), buffer, g_iniPath);
         _itot_s(rc.bottom - rc.top, buffer, 10); WritePrivateProfileString(_T("Session"), _T("WinH"), buffer, g_iniPath);
     }
+    /* 保存全屏状态及全屏前的窗口位置，以便重启后正确恢复 */
+    _itot_s(g_isFullscreen ? 1 : 0, buffer, 10);
+    WritePrivateProfileString(_T("Session"), _T("Fullscreen"), buffer, g_iniPath);
+    if (g_isFullscreen && g_preFullscreenRect.right > g_preFullscreenRect.left) {
+        _itot_s(g_preFullscreenRect.left, buffer, 10); WritePrivateProfileString(_T("Session"), _T("PreFsX"), buffer, g_iniPath);
+        _itot_s(g_preFullscreenRect.top, buffer, 10); WritePrivateProfileString(_T("Session"), _T("PreFsY"), buffer, g_iniPath);
+        _itot_s(g_preFullscreenRect.right - g_preFullscreenRect.left, buffer, 10); WritePrivateProfileString(_T("Session"), _T("PreFsW"), buffer, g_iniPath);
+        _itot_s(g_preFullscreenRect.bottom - g_preFullscreenRect.top, buffer, 10); WritePrivateProfileString(_T("Session"), _T("PreFsH"), buffer, g_iniPath);
+    }
     SaveBookmarks();
     SavePresets();
     auto SaveKey = [](LPCWSTR key, AppHotkey& hk) {
@@ -655,6 +664,14 @@ void LoadConfig() {
     g_winY = GetPrivateProfileInt(_T("Session"), _T("WinY"), 100, g_iniPath);
     g_winW = GetPrivateProfileInt(_T("Session"), _T("WinW"), 1000, g_iniPath);
     g_winH = GetPrivateProfileInt(_T("Session"), _T("WinH"), 600, g_iniPath);
+    g_isFullscreen = GetPrivateProfileInt(_T("Session"), _T("Fullscreen"), 0, g_iniPath) != 0;
+    if (g_isFullscreen) {
+        int pfX = GetPrivateProfileInt(_T("Session"), _T("PreFsX"), 100, g_iniPath);
+        int pfY = GetPrivateProfileInt(_T("Session"), _T("PreFsY"), 100, g_iniPath);
+        int pfW = GetPrivateProfileInt(_T("Session"), _T("PreFsW"), 1000, g_iniPath);
+        int pfH = GetPrivateProfileInt(_T("Session"), _T("PreFsH"), 600, g_iniPath);
+        g_preFullscreenRect = { pfX, pfY, pfX + pfW, pfY + pfH };
+    }
     LoadBookmarks();
     LoadPresets();
     auto LoadKey = [](LPCWSTR key, AppHotkey& hk, UINT defMod, UINT defVk) {
@@ -1308,6 +1325,20 @@ void ShowBookmarkList(HWND hParent) {
 LRESULT CALLBACK SettingsWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     static HWND hRadiusEdit, hSnapEdit, hChkImmStyle, hBtnHk1, hBtnHk2, hBtnHk3, hBtnHk4, hBtnHk5, hBtnHk6, hBtnHk7;
     static bool s_isClosing = false;
+    /* 取消当前热键绑定模式并恢复按钮文本 */
+    auto CancelBinding = [&]() {
+        if (!g_currentSettingKey) return;
+        HWND hBtn = NULL;
+        if (g_currentSettingKey == &g_hkImmersion) hBtn = hBtnHk1;
+        else if (g_currentSettingKey == &g_hkPlayPause) hBtn = hBtnHk2;
+        else if (g_currentSettingKey == &g_hkBack) hBtn = hBtnHk3;
+        else if (g_currentSettingKey == &g_hkForward) hBtn = hBtnHk4;
+        else if (g_currentSettingKey == &g_hkPrevEp) hBtn = hBtnHk5;
+        else if (g_currentSettingKey == &g_hkNextEp) hBtn = hBtnHk6;
+        else if (g_currentSettingKey == &g_hkHideWin) hBtn = hBtnHk7;
+        if (hBtn) SetWindowText(hBtn, GetHotkeyString(g_currentSettingKey->fsModifiers, g_currentSettingKey->vk).c_str());
+        g_currentSettingKey = nullptr;
+    };
     switch (message) {
     case WM_CREATE: {
         RECT rcClient; GetClientRect(hDlg, &rcClient);
@@ -1386,20 +1417,20 @@ LRESULT CALLBACK SettingsWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             UpdateTaskbarVisibility();
             SaveConfig();
         }
-        else if (id == IDC_BTN_HK1) { g_currentSettingKey = &g_hkImmersion; SetWindowText(hBtnHk1, L"按下新键..."); SetFocus(hDlg); }
-        else if (id == IDC_BTN_HK2) { g_currentSettingKey = &g_hkPlayPause; SetWindowText(hBtnHk2, L"按下新键..."); SetFocus(hDlg); }
-        else if (id == IDC_BTN_HK3) { g_currentSettingKey = &g_hkBack; SetWindowText(hBtnHk3, L"按下新键..."); SetFocus(hDlg); }
-        else if (id == IDC_BTN_HK4) { g_currentSettingKey = &g_hkForward; SetWindowText(hBtnHk4, L"按下新键..."); SetFocus(hDlg); }
-        else if (id == IDC_BTN_HK5) { g_currentSettingKey = &g_hkPrevEp; SetWindowText(hBtnHk5, L"按下新键..."); SetFocus(hDlg); }
-        else if (id == IDC_BTN_HK6) { g_currentSettingKey = &g_hkNextEp; SetWindowText(hBtnHk6, L"按下新键..."); SetFocus(hDlg); }
-        else if (id == IDC_BTN_HK7) { g_currentSettingKey = &g_hkHideWin; SetWindowText(hBtnHk7, L"按下新键..."); SetFocus(hDlg); }
-        else g_currentSettingKey = nullptr;
+        else if (id == IDC_BTN_HK1) { CancelBinding(); g_currentSettingKey = &g_hkImmersion; SetWindowText(hBtnHk1, L"按下新键..."); SetFocus(hDlg); }
+        else if (id == IDC_BTN_HK2) { CancelBinding(); g_currentSettingKey = &g_hkPlayPause; SetWindowText(hBtnHk2, L"按下新键..."); SetFocus(hDlg); }
+        else if (id == IDC_BTN_HK3) { CancelBinding(); g_currentSettingKey = &g_hkBack; SetWindowText(hBtnHk3, L"按下新键..."); SetFocus(hDlg); }
+        else if (id == IDC_BTN_HK4) { CancelBinding(); g_currentSettingKey = &g_hkForward; SetWindowText(hBtnHk4, L"按下新键..."); SetFocus(hDlg); }
+        else if (id == IDC_BTN_HK5) { CancelBinding(); g_currentSettingKey = &g_hkPrevEp; SetWindowText(hBtnHk5, L"按下新键..."); SetFocus(hDlg); }
+        else if (id == IDC_BTN_HK6) { CancelBinding(); g_currentSettingKey = &g_hkNextEp; SetWindowText(hBtnHk6, L"按下新键..."); SetFocus(hDlg); }
+        else if (id == IDC_BTN_HK7) { CancelBinding(); g_currentSettingKey = &g_hkHideWin; SetWindowText(hBtnHk7, L"按下新键..."); SetFocus(hDlg); }
         break;
     }
     case WM_KEYDOWN: case WM_SYSKEYDOWN: {
         if (g_currentSettingKey) {
             UINT vk = (UINT)wParam;
-            if (vk == VK_CONTROL || vk == VK_SHIFT || vk == VK_MENU) break;
+            if (vk == VK_ESCAPE) { CancelBinding(); break; }
+            if (vk == VK_CONTROL || vk == VK_SHIFT || vk == VK_MENU || vk == VK_TAB) break;
             UINT mods = 0;
             if (GetKeyState(VK_CONTROL) & 0x8000) mods |= MOD_CONTROL;
             if (GetKeyState(VK_SHIFT) & 0x8000) mods |= MOD_SHIFT;
@@ -1431,6 +1462,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         break;
     }
     case WM_CLOSE: {
+        CancelBinding();
         /* 关闭前读取默认主页编辑框内容 */
         if (g_hEditHome && IsWindow(g_hEditHome)) {
             WCHAR buf[2048];
@@ -1824,7 +1856,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
         }
         else if (LOWORD(wParam) == IDC_SET_BUTTON) OpenSettingsWindow(hWnd);
         else if (LOWORD(wParam) == IDC_ADD_TAB) CreateNewTab(g_homeUrl.c_str(), L"New Tab", true);
-        else if (LOWORD(wParam) == IDC_CLOSE_TAB) CloseCurrentTab();
+        else if (LOWORD(wParam) == IDC_CLOSE_TAB) ShowWindow(hWnd, SW_MINIMIZE);
         else if (LOWORD(wParam) == IDC_BTN_CLOSE_APP) SendMessage(hWnd, WM_CLOSE, 0, 0);
         else if (LOWORD(wParam) == IDC_BTN_FULLSCREEN) ToggleFullscreen();
         else if (LOWORD(wParam) == IDC_BTN_STAR) ToggleCurrentBookmark();
@@ -1987,10 +2019,21 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     }
     return 0;
 }
-/* 程序入口：提权 → 加载配置 → 创建置顶无边框窗口 → 消息循环 */
+/* 程序入口：提权 → 单实例检测 → 加载配置 → 创建置顶无边框窗口 → 消息循环 */
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     CheckAndRestartAsAdmin(hInstance);
+    /* 单实例互斥锁：若已有实例运行则激活其窗口并退出 */
+    HANDLE hMutex = CreateMutex(NULL, TRUE, _T("XiaoChuangBrowser_SingleInstance"));
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        HWND hExist = FindWindow(_T("XiaoChuangClass"), NULL);
+        if (hExist) {
+            ShowWindow(hExist, SW_SHOW);
+            SetForegroundWindow(hExist);
+        }
+        if (hMutex) CloseHandle(hMutex);
+        return 0;
+    }
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     g_hInst = hInstance;
     InitConfigPath(); LoadConfig();
@@ -2013,6 +2056,7 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         return FALSE;
     }
     if (g_useSystemTray) AddTrayIcon();
+    if (g_isFullscreen) SetWindowText(g_hBtnFullscreen, L"❐");
     g_hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, g_hInst, 0);
     ShowWindow(g_hWnd, nCmdShow);
     UpdateWindow(g_hWnd);

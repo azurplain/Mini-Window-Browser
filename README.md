@@ -1,318 +1,203 @@
 <div align="center">
 
-# Mini-Window-Browser
+<img src="assets/app-icon-small-preview.png" alt="小窗浏览器图标" width="112" height="112">
 
-**专为单屏玩家打造的超轻量级 Windows 画中画浏览器**
+# 小窗浏览器
 
-[![Version](https://img.shields.io/badge/version-1.3-blue.svg)](https://github.com/azurplain/Mini-Window-Browser/releases)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-0078d4?logo=windows)](https://github.com/azurplain/Mini-Window-Browser)
-[![WebView2](https://img.shields.io/badge/engine-WebView2-00a4ef?logo=microsoftedge)](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/)
-[![C++](https://img.shields.io/badge/language-C%2B%2B%20%2F%20Win32-00599c?logo=cplusplus)](https://github.com/azurplain/Mini-Window-Browser)
-[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+**专为单屏玩家打造的 Windows 画中画浏览器**
 
-边玩游戏边刷视频，挂机摸鱼两不误。
+让攻略、视频和直播悬浮在游戏上方；需要操作游戏时，窗口可以自动让路。
 
-[**下载**](https://github.com/azurplain/Mini-Window-Browser/releases) · [**用户手册**](用户手册.md) · [**问题反馈**](https://github.com/azurplain/Mini-Window-Browser/issues)
+[![Release](https://img.shields.io/github/v/release/azurplain/Mini-Window-Browser?label=release&color=5865f2)](https://github.com/azurplain/Mini-Window-Browser/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/azurplain/Mini-Window-Browser/total?color=7c5cff)](https://github.com/azurplain/Mini-Window-Browser/releases)
+[![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078d4?logo=windows)](https://www.microsoft.com/windows)
+[![WebView2](https://img.shields.io/badge/WebView2-1.0.4078.44-0f6cbd?logo=microsoftedge)](https://developer.microsoft.com/microsoft-edge/webview2/)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE.txt)
+
+[下载最新版](https://github.com/azurplain/Mini-Window-Browser/releases/latest) · [用户手册](用户手册.md) · [更新日志](CHANGELOG.md) · [问题反馈](https://github.com/azurplain/Mini-Window-Browser/issues)
 
 </div>
 
 ---
 
-## ✨ 功能亮点
+## 它能做什么
+
+小窗浏览器最初为“单显示器玩游戏时查看地图和视频”而开发。它不是一个追求大而全的传统浏览器，而是一个轻量、便携、始终在手边的游戏辅助窗口。
 
 <table>
 <tr>
-<td width="50%">
+<td width="50%" valign="top">
 
-### 🕳️ 沉浸式挖孔穿透
+### 沉浸式挖孔
 
-进入沉浸模式后，窗口边框消失，屏幕上只保留一个**跟随鼠标的圆形区域**显示视频内容，其余区域完全透明且**鼠标点击穿透**——你可以隔着浏览器操作游戏，互不干扰。
-
-</td>
-<td width="50%">
-
-### 👻 整体透明模式
-
-另一种沉浸风格：鼠标移入窗口时自动完全隐藏，移出后恢复显示。适合需要完整查看视频画面的场景，操作底层应用时画面自动让路。
+只保留鼠标附近的圆形画面，其余区域透明并穿透点击。视频不会挡住游戏操作，圆孔半径可调。
 
 </td>
-</tr>
-<tr>
-<td>
+<td width="50%" valign="top">
 
-### 🎯 场景预设 · 一键切换
+### 整体透明
 
-保存窗口位置、大小、挖孔半径、热键配置、当前网址等**全部状态**为预设。不同游戏、不同场景，一键还原布局。
-
-</td>
-<td>
-
-### 🔑 老板键
-
-一键隐藏/显示窗口，支持自动暂停视频。隐藏后除老板键外的所有热键自动注销，避免误触。藏得快，收得稳。
+完整显示小窗内容；鼠标移入时自动隐藏，移出后恢复。基础不透明度可按百分比调节。
 
 </td>
 </tr>
 <tr>
-<td>
+<td valign="top">
 
-### 📑 多标签 & 书签管理
+### 场景预设
 
-轻量级多标签浏览，自绘标签栏带内嵌关闭按钮。一键收藏网页，书签支持行内编辑 URL 和标题。
+保存窗口位置、大小、全部标签页、当前标签、热键和沉浸设置。不同游戏布局可以一键切换。
 
 </td>
-<td>
+<td valign="top">
 
-### 🖱️ 鼠标按键绑定
+### 全局媒体控制
 
-所有热键支持绑定为**鼠标中键**或**侧键**，通过低级鼠标钩子实现全局捕获，全屏游戏中同样生效。
+适配 Bilibili、抖音、YouTube，并回退到通用 HTML5 视频。支持播放、选集、点按跳转和长按快进/快退。
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### 多标签与书签
+
+标签数量增加时自动收窄；标签栏右键可关闭当前、其他或全部标签。书签使用下拉列表，两步即可跳转。
+
+</td>
+<td valign="top">
+
+### 游戏环境热键
+
+键盘、鼠标中键和双侧键均可绑定。低级钩子与 Raw Input 双通道提高管理员游戏和不同鼠标驱动下的可用性。
 
 </td>
 </tr>
 </table>
 
----
+## v1.4 亮点
 
-## 📸 界面一览
+- 使用 Direct2D / DirectWrite 重做 Fluent 风格原生界面，跟随 Windows 深浅色和 DPI。
+- 全新的蓝紫应用图标统一用于 EXE、任务栏、Alt-Tab、窗口和系统托盘。
+- 重构窗口状态机，修复最小化、隐藏恢复、托盘、无缝最大化和多显示器位置恢复。
+- 网页视频全屏只覆盖小窗内容区，可选按视频比例临时调整窗口，退出后恢复原位置。
+- 沉浸挖孔固定为完全透明且孔外不透明；整体透明模式独立提供透明度调节。
+- 预设可保存并恢复全部标签页；书签改为下拉式管理；标签栏支持批量关闭。
+- 新增长按快进/快退、后台媒体热键、输入保护、GPU 兼容模式和视频掉帧诊断。
+- WebView2 SDK 升级至 1.0.4078.44，源码拆分为状态、窗口、UI、热键、输入、媒体和配置模块。
 
-```
-┌─────────────────────────────────────────────────────┐
-│  [拖拽条]                  [✥]                       │ ← 拖拽区域（悬停中央显示移动手柄）
-│  [标签页1] [标签页2] ...      [+] [-] [□] [×]       │ ← 标签栏
-│  [地址栏_____________] [☆][⌵][Go] [预设] [设置]     │ ← 导航栏
-├─────────────────────────────────────────────────────┤
-│                                                     │
-│                     网 页 内 容                       │
-│                                                     │
-└─────────────────────────────────────────────────────┘
-```
+完整变更请查看 [CHANGELOG.md](CHANGELOG.md)。
 
----
+## 快速开始
 
-## 🚀 快速开始
+### 系统要求
 
-### 环境要求
+- Windows 10 或 Windows 11，推荐 x64 系统。
+- Microsoft Edge WebView2 Runtime。Windows 10/11 通常已经安装；缺失时可从[微软官网下载](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
-| 项目 | 要求 |
-|---|---|
-| 操作系统 | Windows 10 / 11 |
-| 运行时 | [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/)（Win10/11 通常已内置） |
+### 下载与运行
 
-### 下载运行
+1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.0-x64.zip`。
+2. 将压缩包完整解压到普通可写目录，不要只从压缩包内直接运行 EXE。
+3. 保持 `XiaoChuang.exe` 与 `WebView2Loader.dll` 位于同一目录。
+4. 双击 `XiaoChuang.exe`，在 Windows UAC 窗口中选择“是”。
 
-1. 前往 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases) 下载最新版压缩包
-2. 解压后确保 `XiaoChuang.exe` 和 `WebView2Loader.dll` 在同一目录
-3. **右键 → 以管理员身份运行**
+程序使用管理员权限，是为了让热键能够在同样以管理员身份运行的游戏和启动器中工作。Windows 不支持便携程序“一次授权后永久免提示”，因此每次启动都会出现 UAC。
 
-> ⚠️ **为什么需要管理员权限？** 全屏游戏通常拥有较高权限，小窗需要同等权限才能在游戏中正常拦截热键。拒绝提权后仍可运行，但全屏游戏中热键可能失效。
+首次运行会在程序目录生成 `config.ini` 和 WebView2 用户数据目录。升级时可以直接覆盖程序文件，但请保留自己的 `config.ini`。
 
-首次运行会自动生成 `config.ini` 配置文件，所有设置、书签、预设均存储于此。
+## 默认快捷键
 
----
-
-## ⌨️ 默认快捷键
-
-| 按键 | 功能 | 说明 |
+| 按键 | 功能 | 行为 |
 |:---:|---|---|
-| `0` | **沉浸模式** 开/关 | 挖孔穿透 / 整体透明（可在设置中切换风格） |
-| `9` | **老板键** | 隐藏/显示窗口，可选自动暂停视频 |
-| `` ` `` | 播放 / 暂停 | 全局控制视频 |
-| `5` / `6` | 后退 / 快进 | ±5 秒 |
-| `7` / `8` | 上一集 / 下一集 | 适配 B站合集 |
+| `0` | 沉浸模式 | 在普通窗口与当前沉浸风格之间切换 |
+| `9` | 隐藏 / 显示 | 一键隐藏或拉起小窗 |
+| `` ` `` | 播放 / 暂停 | 控制当前活动视频 |
+| `5` | 快退 | 点按回退 5 秒，长按连续倒退 |
+| `6` | 快进 | 点按前进 5 秒，长按临时加速 |
+| `7` / `8` | 上一集 / 下一集 | 优先调用网站适配器 |
 
-> 💡 所有热键均可在设置中自定义，支持 `Ctrl` / `Shift` / `Alt` 组合键及鼠标中键/侧键。
->
-> 💡 在网页输入框中打字时热键自动禁用，防止误触。
+所有快捷键都可在设置中改成键盘组合、鼠标中键、鼠标侧键 1 或侧键 2。输入保护开启时，网页输入框、地址栏和可识别的外部编辑控件会暂停媒体及沉浸热键；隐藏/显示键始终保留。
 
----
+## 主要使用方式
 
-## 🧩 功能详情
+### 两种沉浸模式
 
-<details>
-<summary><b>🕳️ 沉浸模式 — 两种风格对比</b></summary>
-
-<br>
-
-| | 挖孔穿透（默认） | 整体透明 |
+| | 挖孔穿透 | 整体透明 |
 |---|---|---|
-| **效果** | 鼠标附近圆形区域显示内容，其余穿透 | 鼠标在窗口上时完全隐藏，移开后完整显示 |
-| **适用** | 局部查看视频画面 | 完整画面查看 |
-| **调节** | 设置中调整挖孔半径 | — |
-| **切换** | 设置 → 勾选"沉浸模式使用整体透明" | 同左 |
+| 显示效果 | 鼠标周围圆形区域显示网页 | 显示完整窗口 |
+| 操作底层程序 | 孔外透明且点击穿透 | 鼠标移入窗口时自动隐藏 |
+| 可调项目 | 圆孔半径 | 基础不透明度 |
+| 适用场景 | 地图标记、局部视频画面 | 直播、攻略和完整视频 |
 
-进入沉浸模式时窗口自动补偿顶栏高度（70px），窗口贴顶时自动贴边，退出时还原。
+### 窗口与网页全屏
 
-</details>
+- 右上角最大化按钮使用当前显示器工作区，保留小窗浏览器顶部栏且不留下缩放边框。
+- 网页播放器请求全屏时，只覆盖小窗网页内容区，不会占满整块显示器。
+- “按视频比例自动调整小窗”可减少网页全屏黑边；退出播放器全屏后恢复原窗口位置和大小。
+- 真正绕过 Windows DWM 的独占全屏游戏无法被普通桌面顶层窗口覆盖。此时请把游戏切换为无边框全屏或窗口化全屏。
 
-<details>
-<summary><b>🎯 场景预设系统</b></summary>
+### 预设、书签与托盘
 
-<br>
+- 预设保存全部标签页、当前标签、窗口布局、沉浸设置、热键和常用开关；名称不可重复。
+- 点击星标收藏当前网页，点击“书签”打开下拉列表，可直接访问、编辑或删除。
+- 开启托盘模式后，最小化会隐藏到托盘；左键单击托盘图标恢复，右键可打开、进入设置或退出。
 
-预设保存的完整状态：
+## 配置与隐私
 
-> 窗口位置/大小 · 全屏状态 · 挖孔半径 · 吸附距离 · 沉浸风格 · 自动暂停开关 · 热键禁用设置 · 托盘模式 · 默认主页 · 当前网址 · 全部 7 个热键绑定
+- 设置、书签、预设和标签会话保存在程序目录的 `config.ini`。
+- 浏览器缓存、Cookie 和网站登录状态保存在 `XiaoChuang.exe.WebView2` 目录。
+- 小窗浏览器本身不会把配置、书签或诊断信息上传到项目服务器；网页内容和登录行为仍由对应网站及 WebView2 处理。
+- 正式发布压缩包不包含任何开发者配置、Cookie、缓存、浏览历史或 PDB 调试文件。
 
-操作方式：
-- **[+ 新建预设]**：保存当前状态（自动检测重名）
-- **[➜]**：一键应用预设
-- **直接编辑名称**：关闭窗口时自动保存
-- **[🗑]**：删除预设
-- **[↺ 还原默认状态]**：重置为初始设置
+## 从源码构建
 
-> 预设不保存书签数据，书签是全局共享的。
+### 依赖
 
-</details>
+- Visual Studio 2022，安装“使用 C++ 的桌面开发”工作负载。
+- Windows 10/11 SDK。
+- NuGet：Microsoft.Web.WebView2 1.0.4078.44、Microsoft.Windows.ImplementationLibrary。
 
-<details>
-<summary><b>📑 书签收藏系统</b></summary>
+### 构建
 
-<br>
-
-- 点击 **☆** 一键收藏/取消收藏（URL 去尾斜杠 + 忽略大小写匹配）
-- 点击 **⌵** 打开书签管理下拉列表
-- 支持行内编辑 URL 和标题，修改即时保存
-- 点击列表外区域自动关闭
-
-</details>
-
-<details>
-<summary><b>🖥️ 更多功能</b></summary>
-
-<br>
-
-**全屏模式** — 点击 □ 按钮切换，使用显示器工作区（排除任务栏），拖动窗口自动退出全屏
-
-**窗口边缘吸附** — 拖动窗口靠近屏幕边缘时自动吸附，按住 Ctrl 拖动临时脱离，吸附距离可调
-
-**系统托盘** — 设置中勾选后隐藏任务栏按钮，双击托盘图标 = 老板键，右键可退出
-
-**地址栏智能识别** — 有协议头直接访问，含点号自动补 `https://`，其余走必应搜索
-
-**会话恢复** — 关闭/重启后自动恢复所有标签页（URL + 标题）及窗口位置
-
-</details>
-
----
-
-## ⚙️ 高级配置
-
-软件会在同目录下自动生成 `config.ini`，支持在软件内设置面板修改，也可手动编辑：
-
-```ini
-[Settings]
-HoleRadius=400        ; 沉浸模式挖孔半径（像素）
-SnapThreshold=20      ; 窗口吸附灵敏度（像素）
-AutoPause=1           ; 老板键隐藏时自动暂停视频
-ImmersionStyle=0      ; 0=挖孔穿透, 1=整体透明
-DisableHkOnTyping=1   ; 输入时自动禁用全局热键
-SystemTray=0          ; 隐藏任务栏图标（托盘模式）
-HomeUrl=https://www.bilibili.com
-
-[Hotkeys]
-; 格式：修饰键代码,虚拟键码（建议通过界面设置）
-Immersion=0,48        ; 数字 0
-HideWin=0,57          ; 数字 9
-PlayPause=0,192       ; 波浪号 `
-```
-
----
-
-## 🔧 从源码构建
-
-### 前置依赖
-
-- **Visual Studio 2022**（含"使用 C++ 的桌面开发"工作负载）
-- NuGet 包（通过项目自动还原）：
-  - `Microsoft.Web.WebView2`
-  - `Microsoft.Windows.ImplementationLibrary`
-
-### 构建步骤
-
-```bash
+```powershell
 git clone https://github.com/azurplain/Mini-Window-Browser.git
+cd Mini-Window-Browser
+msbuild .\小窗.slnx /m /t:Rebuild /p:Configuration=Release /p:Platform=x64
 ```
 
-1. 用 Visual Studio 打开解决方案
-2. 等待 NuGet 包自动还原
-3. 选择 `Release | x64` 配置
-4. **生成 → 生成解决方案**（`Ctrl+Shift+B`）
-5. 输出位于 `x64/Release/` 目录
+x86 构建将 `Platform` 改为 `x86`。核心测试目标不依赖第三方测试框架：
 
-### 项目结构
-
-```
-小窗/
-├── 小窗.cpp          # 全部源代码（单文件）
-├── 小窗.vcxproj      # 项目文件
-├── 小窗.rc           # 资源文件
-├── Resource.h        # 资源 ID 定义
-├── framework.h       # 预编译头
-├── targetver.h       # SDK 版本
-├── 用户手册.md       # 详细使用说明 & FAQ
-└── README.md         # 本文件
+```powershell
+.\x64\Release\XiaoChuang.Tests.exe
 ```
 
----
+### 代码结构
 
-## 📋 更新日志
+```text
+src/
+├── Application.*            应用生命周期、主窗口与 UI
+├── AppModel.h               应用状态与配置模型
+├── ConfigStore.*            INI 配置和兼容迁移
+├── WindowModeController.*   窗口模式、沉浸、全屏与置顶
+├── HotkeyManager.*          键盘/鼠标热键、长按状态
+├── InputGuard.*             输入焦点保护
+├── MediaBridge.*            WebView2 媒体与站点适配
+├── ThemeManager.*           Direct2D/DirectWrite 主题绘制
+└── Diagnostics.*            系统、GPU 与视频诊断
+```
 
-### v1.3（当前版本）
+## 文档
 
-**🐛 Bug 修复**
-- 修复可同时启动多个实例导致出现两个小窗的问题（新增单实例互斥锁）
-- 修复全屏模式下退出程序后重新打开丢失全屏状态的问题（现持久化全屏状态和全屏前窗口位置）
-- 修复设置窗口热键绑定时无法录入键盘数字键的问题（`EN_KILLFOCUS` 误触取消绑定）
-- 修复连续点击多个热键按钮导致前一个按钮永久显示"按下新键..."的问题
-- 修复整体透明沉浸模式重入时透明度状态异常
-- 修复网页标题变更回调的空指针崩溃风险
-- 修复挖孔穿透在窗口句柄未初始化时的未定义行为
-- 修复 64 位系统下 `SetWindowLong` 兼容性问题
-- 修复关闭标签页后配置文件残留脏数据
-- 修复书签/预设列表滚动条 1 像素偏差
+- [用户手册](用户手册.md)：完整设置说明、使用方法和问题排查。
+- [v1.4 更新日志](CHANGELOG.md)：功能、修复、兼容性与已知限制。
+- [发布验证报告](README-测试说明.md)：双架构测试、静态分析和人工验证项目。
+- [第三方许可](THIRD_PARTY_NOTICES.txt)：WebView2 SDK 与 WIL 许可信息。
 
-**✨ 功能改进**
-- 标签栏 `-` 按钮由关闭标签页改为最小化窗口（标签关闭仍可通过标签右侧 × 区域点击）
-- 热键绑定模式新增 ESC 取消支持
-- 第二实例启动时自动激活已有窗口并前置
+## 参与项目
 
-**⚡ 性能优化**
-- 挖孔模式光标位置缓存，鼠标静止时跳过冗余 GDI 操作
-- DPI 感知初始化前移，适配高 DPI 显示器
-- 弹窗窗口类一次性注册，减少冗余系统调用
+欢迎通过 [Issues](https://github.com/azurplain/Mini-Window-Browser/issues) 报告问题或提出建议。反馈时建议附上设置页中的“复制诊断信息”、出现问题的网站、游戏窗口模式和复现步骤。
 
-### v1.2
+## 许可证
 
-- 新增场景预设系统
-- 新增书签收藏功能
-- 新增整体透明沉浸模式
-- 新增系统托盘支持
-- 新增鼠标按键热键绑定
-- 新增全屏模式
-
-### v1.1
-
-- 初始版本
-- 挖孔穿透沉浸模式
-- 全局热键控制
-- 多标签浏览
-- 窗口边缘吸附
-- 会话恢复
-
----
-
-## 📖 文档
-
-完整的使用说明、设置指南和 FAQ 请参阅 **[用户手册](用户手册.md)**。
-
----
-
-## 🤝 贡献
-
-欢迎提交 [Issue](https://github.com/azurplain/Mini-Window-Browser/issues) 和 [Pull Request](https://github.com/azurplain/Mini-Window-Browser/pulls)！
-
----
-
-## 📄 许可证
-
-本项目基于 [GPL-3.0 License](LICENSE) 开源。
+本项目基于 [GNU General Public License v3.0](LICENSE.txt) 开源。

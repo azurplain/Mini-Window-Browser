@@ -27,6 +27,16 @@
     <ClInclude Include="小窗.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="src\AppModel.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\Application.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\ConfigStore.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\CoreLogic.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\Diagnostics.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\HotkeyManager.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\InputGuard.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\MediaBridge.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\ThemeManager.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\WindowModeController.h"><Filter>头文件</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="小窗.rc">
@@ -40,6 +50,8 @@
     <Image Include="小窗.ico">
       <Filter>资源文件</Filter>
     </Image>
+    <Image Include="assets\XiaoChuang.ico"><Filter>资源文件</Filter></Image>
+    <Image Include="assets\app-icon-v1.4.png"><Filter>资源文件</Filter></Image>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
@@ -54,5 +66,14 @@
     <ClCompile Include="小窗.cpp">
       <Filter>源文件</Filter>
     </ClCompile>
+    <ClCompile Include="src\Application.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\ConfigStore.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\CoreLogic.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\Diagnostics.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\HotkeyManager.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\InputGuard.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\MediaBridge.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\ThemeManager.cpp"><Filter>源文件</Filter></ClCompile>
+    <ClCompile Include="src\WindowModeController.cpp"><Filter>源文件</Filter></ClCompile>
   </ItemGroup>
 </Project>

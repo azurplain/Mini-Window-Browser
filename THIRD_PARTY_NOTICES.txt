@@ -1,0 +1,22 @@
+Mini-Window-Browser v1.4.0-test - Third-party notices
+======================================================
+
+Microsoft Edge WebView2 SDK 1.0.4078.44
+Copyright (c) Microsoft Corporation.
+The SDK package is distributed under its included Microsoft software license
+terms and notices. The application redistributes WebView2Loader.dll; the Edge
+WebView2 Runtime is installed separately by Microsoft.
+Project: https://developer.microsoft.com/microsoft-edge/webview2/
+Package license: licenses/WebView2-SDK-LICENSE.txt
+Package notice: licenses/WebView2-SDK-NOTICE.txt
+
+Microsoft Windows Implementation Library (WIL) 1.0.250325.1
+Copyright (c) Microsoft Corporation.
+Licensed under the MIT License.
+Project: https://github.com/microsoft/wil
+Package license: licenses/WIL-LICENSE.txt
+Package notices: licenses/WIL-ThirdPartyNotices.txt
+
+The v1.4 application icon was generated specifically for this project and does
+not embed third-party trademarks or text. The UI is rendered with Windows
+Direct2D/DirectWrite and does not redistribute WinUI or Windows App SDK files.

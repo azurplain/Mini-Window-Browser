@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>XC_READY</title>
+<style>
+  html, body, button { box-sizing: border-box; width: 100%; height: 100%; margin: 0; }
+  button { font: 24px sans-serif; }
+</style>
+<button autofocus onclick="document.documentElement.requestFullscreen().catch(error => document.title = 'XC_ERR_' + error.name)">ENTER FULLSCREEN</button>
+<script>
+  document.addEventListener('fullscreenchange', () => {
+    document.title = document.fullscreenElement ? 'XC_FULL' : 'XC_EXIT';
+  });
+</script>

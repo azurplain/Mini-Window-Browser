@@ -2,6 +2,7 @@
 
 #include "AppModel.h"
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -36,7 +37,6 @@ public:
     void Refresh(bool hidden, bool backgroundMediaHotkeys, bool inputSuppressed);
     bool HandleHotkeyMessage(int identifier);
     bool HandleMouseMessage(WPARAM virtualKey, LPARAM packedState);
-    bool HandleRawInput(LPARAM rawInputHandle);
     bool HandleKeyboardMessage(WPARAM virtualKey, LPARAM packedState);
     void Tick();
     void CancelActiveGesture();
@@ -56,8 +56,15 @@ private:
         ULONGLONG startedAt = 0;
     };
 
-    static LRESULT CALLBACK MouseHookProc(int code, WPARAM message, LPARAM data);
     static LRESULT CALLBACK KeyboardHookProc(int code, WPARAM message, LPARAM data);
+    static DWORD WINAPI RawInputThreadProc(void* context);
+    static LRESULT CALLBACK RawInputWindowProc(HWND window, UINT message,
+                                               WPARAM wParam, LPARAM lParam);
+    DWORD RunRawInputThread();
+    void UpdateRawMouseRegistration();
+    void SetRawMouseRegistration(bool enabled);
+    bool NeedsRawMouseInput() const;
+    void HandleRawInput(LPARAM rawInputHandle) const;
     bool IsActionActive(HotkeyAction action) const;
     std::optional<HotkeyAction> FindById(int identifier) const;
     std::optional<HotkeyAction> FindMouseAction(UINT virtualKey, UINT modifiers) const;
@@ -71,9 +78,12 @@ private:
 
     static HotkeyManager* instance_;
     HWND window_ = nullptr;
-    HHOOK mouseHook_ = nullptr;
     HHOOK keyboardHook_ = nullptr;
-    bool rawMouseRegistered_ = false;
+    HANDLE rawInputThread_ = nullptr;
+    HANDLE rawInputReadyEvent_ = nullptr;
+    DWORD rawInputThreadId_ = 0;
+    std::atomic<HWND> rawInputWindow_{nullptr};
+    std::atomic_bool rawMouseRegistered_{false};
     std::array<HotkeyBinding, kHotkeyCount>* bindings_ = nullptr;
     ActionCallback callback_;
     CaptureCallback captureCallback_;
@@ -83,7 +93,6 @@ private:
     bool backgroundMediaHotkeys_ = false;
     bool inputSuppressed_ = false;
     std::array<bool, 3> mouseDown_{};
-    std::array<bool, 3> hookMouseCaptured_{};
     std::array<bool, 256> keyboardDown_{};
     ULONGLONG lastWindowActionAt_ = 0;
 };

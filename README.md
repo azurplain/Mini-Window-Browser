@@ -69,7 +69,7 @@
 
 ### 游戏环境热键
 
-键盘、鼠标中键和双侧键均可绑定。低级钩子与 Raw Input 双通道提高管理员游戏和不同鼠标驱动下的可用性。
+键盘、鼠标中键和双侧键均可绑定。只在绑定或使用鼠标键时才按需启用独立 Raw Input 线程，避免全局鼠标钩子影响游戏鼠标流畅度。
 
 </td>
 </tr>
@@ -97,7 +97,7 @@
 
 ### 下载与运行
 
-1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.0-x64.zip`。
+1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.1-x64.zip`。
 2. 将压缩包完整解压到普通可写目录，不要只从压缩包内直接运行 EXE。
 3. 保持 `XiaoChuang.exe` 与 `WebView2Loader.dll` 位于同一目录。
 4. 双击 `XiaoChuang.exe`，在 Windows UAC 窗口中选择“是”。
@@ -135,6 +135,7 @@
 - 右上角最大化按钮使用当前显示器工作区，保留小窗浏览器顶部栏且不留下缩放边框。
 - 网页播放器请求全屏时，只覆盖小窗网页内容区，不会占满整块显示器。
 - “按视频比例自动调整小窗”可减少网页全屏黑边；退出播放器全屏后恢复原窗口位置和大小。
+- 勾选自动调整后，可进一步开启“全屏后锁定画面比例”，拖动窗口边缘时按视频比例等比缩放。
 - 真正绕过 Windows DWM 的独占全屏游戏无法被普通桌面顶层窗口覆盖。此时请把游戏切换为无边框全屏或窗口化全屏。
 
 ### 预设、书签与托盘

@@ -107,11 +107,13 @@ void WindowModeController::SetSystemTray(bool enabled) {
 void WindowModeController::EnterWebFullscreen() {
     if (!window_ || webFullscreen_) return;
     webFullscreen_ = true;
+    webFullscreenAspect_ = 0.0;
 }
 
 void WindowModeController::LeaveWebFullscreen() {
     if (!window_ || !webFullscreen_) return;
     webFullscreen_ = false;
+    webFullscreenAspect_ = 0.0;
     if (!videoFitActive_) return;
 
     videoFitActive_ = false;
@@ -122,8 +124,10 @@ void WindowModeController::LeaveWebFullscreen() {
 }
 
 void WindowModeController::FitWebFullscreenAspect(double aspectRatio) {
-    if (!window_ || !webFullscreen_ || hidden_ || visibleMode_ != WindowMode::Normal ||
-        !std::isfinite(aspectRatio) || aspectRatio <= 0.1 || aspectRatio >= 10.0) return;
+    if (!window_ || !webFullscreen_ || !std::isfinite(aspectRatio) ||
+        aspectRatio <= 0.1 || aspectRatio >= 10.0) return;
+    webFullscreenAspect_ = aspectRatio;
+    if (hidden_ || visibleMode_ != WindowMode::Normal) return;
 
     RECT current{};
     if (!GetWindowRect(window_, &current)) return;
@@ -148,6 +152,18 @@ void WindowModeController::FitWebFullscreenAspect(double aspectRatio) {
                  desired.right - desired.left, desired.bottom - desired.top,
                  SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
     if (layoutCallback_) layoutCallback_();
+}
+
+bool WindowModeController::ConstrainWebFullscreenSizing(UINT sizingEdge, RECT* sizingRect) const {
+    if (!sizingRect || !settings_ || !webFullscreen_ ||
+        !settings_->autoFitVideoFullscreen || !settings_->lockVideoFullscreenAspect ||
+        !std::isfinite(webFullscreenAspect_) || webFullscreenAspect_ <= 0.1) {
+        return false;
+    }
+    const int visibleChromeHeight = IsImmersive() ? 0 : chromeHeight_;
+    *sizingRect = ConstrainAspectSizingRect(*sizingRect, sizingEdge, visibleChromeHeight,
+                                            webFullscreenAspect_);
+    return true;
 }
 
 bool WindowModeController::RestoreMaximizedForDrag(POINT cursor) {

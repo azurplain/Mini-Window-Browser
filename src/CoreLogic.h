@@ -80,5 +80,7 @@ RECT CalculateRestoredDragRect(const RECT& maximizedRect, const RECT& normalRect
                                POINT cursor, const RECT& workArea, int chromeHeight);
 SIZE CalculateAspectFitWindowSize(int preferredWidth, int chromeHeight, double aspectRatio,
                                   int maximumWidth, int maximumHeight);
+RECT ConstrainAspectSizingRect(RECT proposedRect, UINT sizingEdge, int chromeHeight,
+                               double aspectRatio);
 
 } // namespace xiaochuang

@@ -192,4 +192,29 @@ SIZE CalculateAspectFitWindowSize(int preferredWidth, int chromeHeight, double a
     return SIZE{width, std::clamp(height, 1, maximumHeight)};
 }
 
+RECT ConstrainAspectSizingRect(RECT proposedRect, UINT sizingEdge, int chromeHeight,
+                               double aspectRatio) {
+    if (!std::isfinite(aspectRatio) || aspectRatio <= 0.05 || aspectRatio >= 20.0) {
+        return proposedRect;
+    }
+
+    chromeHeight = std::max(0, chromeHeight);
+    int width = std::max(1, static_cast<int>(proposedRect.right - proposedRect.left));
+    int height = std::max(chromeHeight + 1,
+                          static_cast<int>(proposedRect.bottom - proposedRect.top));
+    const bool heightDriven = sizingEdge == WMSZ_TOP || sizingEdge == WMSZ_BOTTOM;
+    if (heightDriven) {
+        width = std::max(1, static_cast<int>(
+            std::lround(std::max(1, height - chromeHeight) * aspectRatio)));
+        proposedRect.right = proposedRect.left + width;
+    } else {
+        height = chromeHeight + std::max(1, static_cast<int>(std::lround(width / aspectRatio)));
+        const bool topEdge = sizingEdge == WMSZ_TOP || sizingEdge == WMSZ_TOPLEFT ||
+            sizingEdge == WMSZ_TOPRIGHT;
+        if (topEdge) proposedRect.top = proposedRect.bottom - height;
+        else proposedRect.bottom = proposedRect.top + height;
+    }
+    return proposedRect;
+}
+
 } // namespace xiaochuang

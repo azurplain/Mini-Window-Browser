@@ -37,6 +37,7 @@ public:
     void EnterWebFullscreen();
     void LeaveWebFullscreen();
     void FitWebFullscreenAspect(double aspectRatio);
+    bool ConstrainWebFullscreenSizing(UINT sizingEdge, RECT* sizingRect) const;
     bool RestoreMaximizedForDrag(POINT cursor);
     void ApplyPresetGeometry(const RECT& normalRect, bool maximized);
     void UpdateNormalRectFromWindow();
@@ -68,6 +69,7 @@ private:
     bool systemTray_ = false;
     bool webFullscreen_ = false;
     bool videoFitActive_ = false;
+    double webFullscreenAspect_ = 0.0;
     POINT lastCursor_{LONG_MIN, LONG_MIN};
     bool hoverCandidate_ = false;
     bool hoverApplied_ = false;

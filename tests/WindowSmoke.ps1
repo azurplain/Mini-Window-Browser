@@ -44,6 +44,8 @@ public static class XcNative {
     [DllImport("user32.dll")]
     public static extern bool IsWindow(IntPtr h);
     [DllImport("user32.dll")]
+    public static extern bool IsWindowEnabled(IntPtr h);
+    [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr h, out RECT r);
     [DllImport("user32.dll")]
     public static extern IntPtr GetDC(IntPtr h);
@@ -163,6 +165,21 @@ try {
     $settings = [XcNative]::GetLastActivePopup($window)
     $style = [XcNative]::GetDlgItem($settings, 2003)
     $opacity = [XcNative]::GetDlgItem($settings, 2004)
+    $autoFit = [XcNative]::GetDlgItem($settings, 2017)
+    $lockAspect = [XcNative]::GetDlgItem($settings, 2019)
+    $lockInitiallyDisabled = -not [XcNative]::IsWindowEnabled($lockAspect)
+    [void][XcNative]::SendMessage($autoFit, 0x00f1, [UIntPtr]1, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2017, $autoFit)
+    $lockEnabled = Wait-Condition { [XcNative]::IsWindowEnabled($lockAspect) }
+    [void][XcNative]::SendMessage($lockAspect, 0x00f1, [UIntPtr]1, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2019, $lockAspect)
+    $lockSaved = (Get-Content -LiteralPath (Join-Path $tempRoot 'config.ini') -Raw) -match
+        '(?m)^LockVideoFullscreenAspect=1\r?$'
+    [void][XcNative]::SendMessage($autoFit, 0x00f1, [UIntPtr]0, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2017, $autoFit)
+    $lockDisabledAgain = Wait-Condition { -not [XcNative]::IsWindowEnabled($lockAspect) }
+    $results.FullscreenAspectLockOption = $lockInitiallyDisabled -and $lockEnabled -and
+        $lockSaved -and $lockDisabledAgain
     $hiddenForHole = $opacity -ne [IntPtr]::Zero -and -not [XcNative]::IsWindowVisible($opacity)
     [void][XcNative]::SendMessage($style, 0x14e, [UIntPtr]1, [IntPtr]::Zero)
     $styleChanged = [UIntPtr]((1 -shl 16) -bor 2003)

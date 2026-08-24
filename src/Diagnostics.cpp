@@ -46,7 +46,7 @@ std::wstring BuildSystemDiagnostics(const AppState& state,
         }
     }
     std::wostringstream output;
-    output << L"Mini Window Browser 1.4.0\r\n"
+    output << L"Mini Window Browser 1.4.1 test\r\n"
            << L"Windows: " << version.dwMajorVersion << L'.' << version.dwMinorVersion
            << L" build " << version.dwBuildNumber << L"\r\n"
            << L"HAGS: " << HagsState() << L"\r\n"
@@ -58,7 +58,8 @@ std::wstring BuildSystemDiagnostics(const AppState& state,
            << L"Auto-hide opacity: " << state.settings.autoHideOpacityPercent << L"%\r\n"
            << L"Hold rate: " << state.settings.holdPlaybackRate << L"x\r\n"
            << L"Background media hotkeys: "
-           << (state.settings.backgroundMediaHotkeys ? L"enabled" : L"disabled") << L"\r\n";
+           << (state.settings.backgroundMediaHotkeys ? L"enabled" : L"disabled") << L"\r\n"
+           << L"Mouse hotkeys: on-demand dedicated Raw Input thread (no WH_MOUSE_LL)\r\n";
     return output.str();
 }
 

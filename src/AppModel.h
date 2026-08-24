@@ -80,6 +80,7 @@ struct AppSettings {
     bool useSystemTray = false;
     bool backgroundMediaHotkeys = false;
     bool autoFitVideoFullscreen = false;
+    bool lockVideoFullscreenAspect = false;
     bool maximizedTopDragEnabled = false;
     ImmersionStyle immersionStyle = ImmersionStyle::Hole;
     RenderMode renderMode = RenderMode::AutomaticGpu;

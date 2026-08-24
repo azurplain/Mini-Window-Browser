@@ -94,6 +94,7 @@ bool ConfigStore::Load(AppState& state) const {
     state.settings.useSystemTray = ReadInt(path_, kSettings, L"SystemTray", 0) != 0;
     state.settings.backgroundMediaHotkeys = ReadInt(path_, kSettings, L"BackgroundMediaHotkeys", 0) != 0;
     state.settings.autoFitVideoFullscreen = ReadInt(path_, kSettings, L"AutoFitVideoFullscreen", 0) != 0;
+    state.settings.lockVideoFullscreenAspect = ReadInt(path_, kSettings, L"LockVideoFullscreenAspect", 0) != 0;
     state.settings.maximizedTopDragEnabled = ReadInt(path_, kSettings, L"MaximizedTopDragEnabled", 0) != 0;
     state.settings.immersionStyle = static_cast<ImmersionStyle>(
         std::clamp(ReadInt(path_, kSettings, L"ImmersionStyle", 0), 0, 1));
@@ -206,6 +207,7 @@ bool ConfigStore::Save(const AppState& state, const RECT& normalRect, bool maxim
     WriteInt(path_, kSettings, L"SystemTray", settings.useSystemTray ? 1 : 0);
     WriteInt(path_, kSettings, L"BackgroundMediaHotkeys", settings.backgroundMediaHotkeys ? 1 : 0);
     WriteInt(path_, kSettings, L"AutoFitVideoFullscreen", settings.autoFitVideoFullscreen ? 1 : 0);
+    WriteInt(path_, kSettings, L"LockVideoFullscreenAspect", settings.lockVideoFullscreenAspect ? 1 : 0);
     WriteInt(path_, kSettings, L"MaximizedTopDragEnabled", settings.maximizedTopDragEnabled ? 1 : 0);
     WriteInt(path_, kSettings, L"ImmersionStyle", static_cast<int>(settings.immersionStyle));
     WriteString(path_, kSettings, L"RenderMode",

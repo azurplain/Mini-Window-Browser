@@ -46,6 +46,7 @@ void TestConfigMigration() {
           state.settings.autoHideOpacityPercent == 100, L"新增透明度键默认迁移");
     Check(!state.settings.backgroundMediaHotkeys, L"后台媒体热键默认关闭");
     Check(!state.settings.autoFitVideoFullscreen, L"网页全屏比例适配默认关闭");
+    Check(!state.settings.lockVideoFullscreenAspect, L"网页全屏比例锁定默认关闭");
     Check(!state.settings.maximizedTopDragEnabled, L"最大化顶部拖动恢复默认关闭");
     Check(state.tabs.size() == 1, L"空旧会话自动生成主页标签");
 
@@ -55,11 +56,16 @@ void TestConfigMigration() {
     Check(store.Load(reloaded), L"新配置可重新加载");
     Check(reloaded.settings.holeOpacityPercent == 100, L"新增配置往返一致");
     Check(!reloaded.settings.autoFitVideoFullscreen, L"网页全屏比例适配配置往返一致");
+    reloaded.settings.autoFitVideoFullscreen = true;
+    reloaded.settings.lockVideoFullscreenAspect = true;
     reloaded.settings.maximizedTopDragEnabled = true;
     Check(store.Save(reloaded, rect, false), L"最大化顶部拖动配置可保存");
     xiaochuang::AppState dragSettingReloaded;
     Check(store.Load(dragSettingReloaded) && dragSettingReloaded.settings.maximizedTopDragEnabled,
           L"最大化顶部拖动配置往返一致");
+    Check(dragSettingReloaded.settings.autoFitVideoFullscreen &&
+          dragSettingReloaded.settings.lockVideoFullscreenAspect,
+          L"网页全屏自动适配与比例锁定配置往返一致");
 
     xiaochuang::Preset preset;
     preset.name = L"三标签";
@@ -192,6 +198,16 @@ void TestWindowGeometryHelpers() {
     Check(wide.cx == 1000 && wide.cy == 631, L"16:9 视频自动计算小窗高度");
     const SIZE constrained = CalculateAspectFitWindowSize(1900, 68, 1.0, 1920, 1040);
     Check(constrained.cx == 972 && constrained.cy == 1040, L"视频比例适配不超出工作区");
+    const RECT widthDriven = ConstrainAspectSizingRect(
+        RECT{100, 100, 900, 900}, WMSZ_RIGHT, 68, 16.0 / 9.0);
+    Check(widthDriven.left == 100 && widthDriven.right == 900 &&
+          widthDriven.top == 100 && widthDriven.bottom == 618,
+          L"全屏拖动左右边缘时保持视频比例");
+    const RECT heightDriven = ConstrainAspectSizingRect(
+        RECT{100, 100, 700, 600}, WMSZ_BOTTOM, 68, 16.0 / 9.0);
+    Check(heightDriven.left == 100 && heightDriven.right == 868 &&
+          heightDriven.top == 100 && heightDriven.bottom == 600,
+          L"全屏拖动上下边缘时保持视频比例");
 }
 
 } // namespace

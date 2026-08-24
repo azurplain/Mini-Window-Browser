@@ -54,6 +54,7 @@ private:
         SettingsRepository = 2016,
         SettingsAutoFitFullscreen = 2017,
         SettingsMaximizedTopDrag = 2018,
+        SettingsLockFullscreenAspect = 2019,
         SettingsHotkeyBase = 2100,
 
         BookmarkList = 3001,
@@ -246,6 +247,7 @@ private:
         HWND opacityPercent = nullptr;
         HWND autoPause = nullptr;
         HWND autoFitFullscreen = nullptr;
+        HWND lockFullscreenAspect = nullptr;
         HWND maximizedTopDrag = nullptr;
         HWND typing = nullptr;
         HWND tray = nullptr;

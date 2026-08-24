@@ -4,9 +4,13 @@
 #include "CoreLogic.h"
 
 #include <cstddef>
-#include <vector>
 
 namespace xiaochuang {
+
+namespace {
+constexpr wchar_t kRawInputWindowClass[] = L"XiaoChuangRawInputV141";
+constexpr UINT kUpdateRawInputRegistration = WM_APP + 1;
+}
 
 HotkeyManager* HotkeyManager::instance_ = nullptr;
 
@@ -21,16 +25,16 @@ bool HotkeyManager::Start(HWND window, std::array<HotkeyBinding, kHotkeyCount>* 
     bindings_ = bindings;
     callback_ = std::move(callback);
     instance_ = this;
-    mouseHook_ = SetWindowsHookExW(WH_MOUSE_LL, MouseHookProc, GetModuleHandleW(nullptr), 0);
     keyboardHook_ = SetWindowsHookExW(WH_KEYBOARD_LL, KeyboardHookProc, GetModuleHandleW(nullptr), 0);
-    RAWINPUTDEVICE rawMouse{};
-    rawMouse.usUsagePage = 0x01;
-    rawMouse.usUsage = 0x02;
-    rawMouse.dwFlags = RIDEV_INPUTSINK;
-    rawMouse.hwndTarget = window_;
-    rawMouseRegistered_ = RegisterRawInputDevices(&rawMouse, 1, sizeof(rawMouse)) == TRUE;
+    rawInputReadyEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (rawInputReadyEvent_) {
+        rawInputThread_ = CreateThread(nullptr, 0, RawInputThreadProc, this, 0, &rawInputThreadId_);
+        if (rawInputThread_) {
+            WaitForSingleObject(rawInputReadyEvent_, 5000);
+        }
+    }
     Refresh(false, false, false);
-    return (mouseHook_ != nullptr || rawMouseRegistered_) && keyboardHook_ != nullptr;
+    return rawInputWindow_.load() != nullptr && keyboardHook_ != nullptr;
 }
 
 void HotkeyManager::Stop() {
@@ -40,30 +44,30 @@ void HotkeyManager::Stop() {
             UnregisterHotKey(window_, binding.id);
         }
     }
-    if (mouseHook_) {
-        UnhookWindowsHookEx(mouseHook_);
-        mouseHook_ = nullptr;
-    }
     if (keyboardHook_) {
         UnhookWindowsHookEx(keyboardHook_);
         keyboardHook_ = nullptr;
     }
-    if (rawMouseRegistered_) {
-        RAWINPUTDEVICE rawMouse{};
-        rawMouse.usUsagePage = 0x01;
-        rawMouse.usUsage = 0x02;
-        rawMouse.dwFlags = RIDEV_REMOVE;
-        rawMouse.hwndTarget = nullptr;
-        RegisterRawInputDevices(&rawMouse, 1, sizeof(rawMouse));
-        rawMouseRegistered_ = false;
+    if (rawInputThread_) {
+        if (const HWND rawWindow = rawInputWindow_.load()) PostMessageW(rawWindow, WM_CLOSE, 0, 0);
+        else if (rawInputThreadId_) PostThreadMessageW(rawInputThreadId_, WM_QUIT, 0, 0);
+        WaitForSingleObject(rawInputThread_, 5000);
+        CloseHandle(rawInputThread_);
+        rawInputThread_ = nullptr;
     }
+    if (rawInputReadyEvent_) {
+        CloseHandle(rawInputReadyEvent_);
+        rawInputReadyEvent_ = nullptr;
+    }
+    rawInputThreadId_ = 0;
+    rawInputWindow_.store(nullptr);
+    rawMouseRegistered_.store(false);
     if (instance_ == this) instance_ = nullptr;
     captureCallback_ = {};
     callback_ = {};
     bindings_ = nullptr;
     window_ = nullptr;
     mouseDown_.fill(false);
-    hookMouseCaptured_.fill(false);
     keyboardDown_.fill(false);
     lastWindowActionAt_ = 0;
 }
@@ -88,6 +92,7 @@ void HotkeyManager::Refresh(bool hidden, bool backgroundMediaHotkeys, bool input
             registrationErrors_.push_back(binding.displayName + L"（" + HotkeyDisplayText(binding) + L"）");
         }
     }
+    UpdateRawMouseRegistration();
 }
 
 bool HotkeyManager::HandleHotkeyMessage(int identifier) {
@@ -136,29 +141,25 @@ bool HotkeyManager::HandleMouseMessage(WPARAM virtualKeyValue, LPARAM packedStat
     return true;
 }
 
-bool HotkeyManager::HandleRawInput(LPARAM rawInputHandle) {
-    UINT size = 0;
-    if (GetRawInputData(reinterpret_cast<HRAWINPUT>(rawInputHandle), RID_INPUT, nullptr,
-                        &size, sizeof(RAWINPUTHEADER)) != 0 || size < sizeof(RAWINPUTHEADER)) {
-        return false;
+void HotkeyManager::HandleRawInput(LPARAM rawInputHandle) const {
+    RAWINPUT input{};
+    UINT size = sizeof(input);
+    const UINT copied = GetRawInputData(reinterpret_cast<HRAWINPUT>(rawInputHandle), RID_INPUT,
+                                        &input, &size, sizeof(RAWINPUTHEADER));
+    if (copied == static_cast<UINT>(-1) || input.header.dwType != RIM_TYPEMOUSE) return;
+    const USHORT buttonFlags = input.data.mouse.usButtonFlags;
+    if ((buttonFlags & (RI_MOUSE_BUTTON_3_DOWN | RI_MOUSE_BUTTON_3_UP |
+                        RI_MOUSE_BUTTON_4_DOWN | RI_MOUSE_BUTTON_4_UP |
+                        RI_MOUSE_BUTTON_5_DOWN | RI_MOUSE_BUTTON_5_UP)) == 0) {
+        return;
     }
-    std::vector<std::byte> bytes(size);
-    if (GetRawInputData(reinterpret_cast<HRAWINPUT>(rawInputHandle), RID_INPUT, bytes.data(),
-                        &size, sizeof(RAWINPUTHEADER)) != size) {
-        return false;
-    }
-    const auto* input = reinterpret_cast<const RAWINPUT*>(bytes.data());
-    if (input->header.dwType != RIM_TYPEMOUSE) return false;
-
     const UINT modifiers = CurrentModifiers();
-    bool handled = false;
     for (const MouseButtonTransition& transition :
-         DecodeRawMouseButtons(input->data.mouse.usButtonFlags)) {
+         DecodeRawMouseButtons(buttonFlags)) {
         const LPARAM packed = static_cast<LPARAM>((transition.down ? 1U : 0U) |
                                                    (modifiers << 16U));
-        handled = HandleMouseMessage(transition.virtualKey, packed) || handled;
+        PostMessageW(window_, kMessageMouseHotkey, transition.virtualKey, packed);
     }
-    return handled;
 }
 
 bool HotkeyManager::HandleKeyboardMessage(WPARAM virtualKeyValue, LPARAM packedState) {
@@ -205,54 +206,12 @@ void HotkeyManager::CancelActiveGesture() {
 void HotkeyManager::BeginMouseCapture(CaptureCallback callback) {
     CancelActiveGesture();
     captureCallback_ = std::move(callback);
+    UpdateRawMouseRegistration();
 }
 
 void HotkeyManager::CancelMouseCapture() {
     captureCallback_ = {};
-}
-
-LRESULT CALLBACK HotkeyManager::MouseHookProc(int code, WPARAM message, LPARAM data) {
-    if (code != HC_ACTION || !instance_ || !instance_->window_) {
-        return CallNextHookEx(instance_ ? instance_->mouseHook_ : nullptr, code, message, data);
-    }
-    UINT virtualKey = 0;
-    bool down = false;
-    bool up = false;
-    if (message == WM_MBUTTONDOWN || message == WM_NCMBUTTONDOWN) {
-        virtualKey = VK_MBUTTON; down = true;
-    } else if (message == WM_MBUTTONUP || message == WM_NCMBUTTONUP) {
-        virtualKey = VK_MBUTTON; up = true;
-    } else if (message == WM_XBUTTONDOWN || message == WM_NCXBUTTONDOWN ||
-               message == WM_XBUTTONUP || message == WM_NCXBUTTONUP) {
-        const auto* mouse = reinterpret_cast<const MSLLHOOKSTRUCT*>(data);
-        virtualKey = HIWORD(mouse->mouseData) == XBUTTON1 ? VK_XBUTTON1 : VK_XBUTTON2;
-        down = message == WM_XBUTTONDOWN || message == WM_NCXBUTTONDOWN;
-        up = !down;
-    }
-    if (virtualKey == 0 || (!down && !up)) {
-        return CallNextHookEx(instance_->mouseHook_, code, message, data);
-    }
-
-    const auto stateIndex = MouseStateIndex(virtualKey);
-    if (!stateIndex) return CallNextHookEx(instance_->mouseHook_, code, message, data);
-    const UINT modifiers = CurrentModifiers();
-    const bool capture = instance_->captureCallback_ && down;
-    const bool actionMatch = down && instance_->FindMouseAction(virtualKey, modifiers).has_value();
-    if (down && (capture || actionMatch)) {
-        if (!instance_->hookMouseCaptured_[*stateIndex]) {
-            instance_->hookMouseCaptured_[*stateIndex] = true;
-            const LPARAM packed = static_cast<LPARAM>(1U | (modifiers << 16U));
-            PostMessageW(instance_->window_, kMessageMouseHotkey, virtualKey, packed);
-        }
-        return 1;
-    }
-    if (up && instance_->hookMouseCaptured_[*stateIndex]) {
-        instance_->hookMouseCaptured_[*stateIndex] = false;
-        const LPARAM packed = static_cast<LPARAM>((down ? 1U : 0U) | (modifiers << 16U));
-        PostMessageW(instance_->window_, kMessageMouseHotkey, virtualKey, packed);
-        return 1;
-    }
-    return CallNextHookEx(instance_->mouseHook_, code, message, data);
+    UpdateRawMouseRegistration();
 }
 
 LRESULT CALLBACK HotkeyManager::KeyboardHookProc(int code, WPARAM message, LPARAM data) {
@@ -296,6 +255,96 @@ LRESULT CALLBACK HotkeyManager::KeyboardHookProc(int code, WPARAM message, LPARA
     const LPARAM packed = static_cast<LPARAM>(1U | (modifiers << 16U));
     PostMessageW(instance_->window_, kMessageKeyboardHotkey, virtualKey, packed);
     return 1;
+}
+
+DWORD WINAPI HotkeyManager::RawInputThreadProc(void* context) {
+    auto* manager = static_cast<HotkeyManager*>(context);
+    return manager ? manager->RunRawInputThread() : 0;
+}
+
+LRESULT CALLBACK HotkeyManager::RawInputWindowProc(HWND window, UINT message,
+                                                    WPARAM wParam, LPARAM lParam) {
+    auto* manager = reinterpret_cast<HotkeyManager*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        const auto* create = reinterpret_cast<const CREATESTRUCTW*>(lParam);
+        manager = static_cast<HotkeyManager*>(create->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(manager));
+    }
+    if (message == WM_INPUT && manager) {
+        manager->HandleRawInput(lParam);
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
+    if (message == kUpdateRawInputRegistration && manager) {
+        manager->SetRawMouseRegistration(wParam != 0);
+        return 0;
+    }
+    if (message == WM_CLOSE) {
+        DestroyWindow(window);
+        return 0;
+    }
+    if (message == WM_DESTROY) {
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
+}
+
+DWORD HotkeyManager::RunRawInputThread() {
+    WNDCLASSEXW windowClass{sizeof(windowClass)};
+    windowClass.lpfnWndProc = RawInputWindowProc;
+    windowClass.hInstance = GetModuleHandleW(nullptr);
+    windowClass.lpszClassName = kRawInputWindowClass;
+    if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        if (rawInputReadyEvent_) SetEvent(rawInputReadyEvent_);
+        return 1;
+    }
+
+    const HWND rawWindow = CreateWindowExW(0, kRawInputWindowClass, L"", 0,
+        0, 0, 0, 0, HWND_MESSAGE, nullptr, windowClass.hInstance, this);
+    rawInputWindow_.store(rawWindow);
+    if (rawInputReadyEvent_) SetEvent(rawInputReadyEvent_);
+    if (!rawWindow) {
+        if (rawWindow) DestroyWindow(rawWindow);
+        rawInputWindow_.store(nullptr);
+        return 1;
+    }
+
+    MSG message{};
+    while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+
+    SetRawMouseRegistration(false);
+    rawInputWindow_.store(nullptr);
+    return 0;
+}
+
+void HotkeyManager::UpdateRawMouseRegistration() {
+    if (const HWND rawWindow = rawInputWindow_.load()) {
+        SendMessageW(rawWindow, kUpdateRawInputRegistration,
+                     NeedsRawMouseInput() ? TRUE : FALSE, 0);
+    }
+}
+
+void HotkeyManager::SetRawMouseRegistration(bool enabled) {
+    if (enabled == rawMouseRegistered_.load()) return;
+    RAWINPUTDEVICE rawMouse{};
+    rawMouse.usUsagePage = 0x01;
+    rawMouse.usUsage = 0x02;
+    rawMouse.dwFlags = enabled ? RIDEV_INPUTSINK : RIDEV_REMOVE;
+    rawMouse.hwndTarget = enabled ? rawInputWindow_.load() : nullptr;
+    const bool succeeded = RegisterRawInputDevices(&rawMouse, 1, sizeof(rawMouse)) == TRUE;
+    if (succeeded) rawMouseRegistered_.store(enabled);
+}
+
+bool HotkeyManager::NeedsRawMouseInput() const {
+    if (captureCallback_ || !bindings_) return static_cast<bool>(captureCallback_);
+    for (size_t index = 0; index < kHotkeyCount; ++index) {
+        const HotkeyAction action = static_cast<HotkeyAction>(index);
+        if (IsActionActive(action) && IsMouseKey((*bindings_)[index].virtualKey)) return true;
+    }
+    return false;
 }
 
 bool HotkeyManager::IsActionActive(HotkeyAction action) const {

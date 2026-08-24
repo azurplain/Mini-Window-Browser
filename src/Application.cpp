@@ -35,11 +35,19 @@ using Microsoft::WRL::Make;
 namespace xiaochuang {
 namespace {
 
+#ifdef XIAOCHUANG_SMOKE_TEST
+constexpr wchar_t kMainWindowClass[] = L"XiaoChuangMainWindowV14Smoke";
+constexpr wchar_t kSettingsWindowClass[] = L"XiaoChuangSettingsV14Smoke";
+constexpr wchar_t kBookmarkWindowClass[] = L"XiaoChuangBookmarksV14Smoke";
+constexpr wchar_t kPresetWindowClass[] = L"XiaoChuangPresetsV14Smoke";
+constexpr wchar_t kSingleInstanceName[] = L"MiniWindowBrowser-v1.4-SmokeTest-SingleInstance";
+#else
 constexpr wchar_t kMainWindowClass[] = L"XiaoChuangMainWindowV14";
 constexpr wchar_t kSettingsWindowClass[] = L"XiaoChuangSettingsV14";
 constexpr wchar_t kBookmarkWindowClass[] = L"XiaoChuangBookmarksV14";
 constexpr wchar_t kPresetWindowClass[] = L"XiaoChuangPresetsV14";
 constexpr wchar_t kSingleInstanceName[] = L"MiniWindowBrowser-v1.4-SingleInstance";
+#endif
 constexpr UINT kCloseCurrentTabCommand = 51001;
 constexpr UINT kCloseOtherTabsCommand = 51002;
 constexpr UINT kCloseAllTabsCommand = 51003;
@@ -488,6 +496,12 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         windowModes_.SnapMovingRect(reinterpret_cast<RECT*>(lParam),
             (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0);
         return TRUE;
+    case WM_SIZING:
+        if (windowModes_.ConstrainWebFullscreenSizing(
+                static_cast<UINT>(wParam), reinterpret_cast<RECT*>(lParam))) {
+            return TRUE;
+        }
+        break;
     case WM_EXITSIZEMOVE:
         windowModes_.UpdateNormalRectFromWindow();
         SaveConfiguration();
@@ -540,9 +554,6 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
     case kMessageMouseHotkey:
         hotkeys_.HandleMouseMessage(wParam, lParam);
         return 0;
-    case WM_INPUT:
-        hotkeys_.HandleRawInput(lParam);
-        return DefWindowProcW(window, message, wParam, lParam);
     case kMessageKeyboardHotkey:
         hotkeys_.HandleKeyboardMessage(wParam, lParam);
         return 0;
@@ -704,6 +715,11 @@ LRESULT CALLBACK Application::AddressProc(HWND window, UINT message, WPARAM wPar
     if (!application || !application->oldAddressProc_) return DefWindowProcW(window, message, wParam, lParam);
     if (message == WM_KEYDOWN && wParam == VK_RETURN) {
         application->NavigateAddressBar();
+        return 0;
+    }
+    if (message == WM_CHAR && wParam == VK_RETURN) {
+        // A single-line EDIT beeps when it receives the translated Return
+        // character. Navigation already happened on WM_KEYDOWN, so consume it.
         return 0;
     }
     if (message == WM_LBUTTONDBLCLK) {
@@ -1528,6 +1544,10 @@ void Application::CreateSettingsControls(HWND window) {
     settingsControls_.autoFitFullscreen = checkbox(
         L"网页视频全屏时自动按画面比例调整小窗大小", SettingsAutoFitFullscreen, y);
     y += Scale(30);
+    settingsControls_.lockFullscreenAspect = checkbox(
+        L"全屏后锁定画面比例（拖动边缘时等比缩放）",
+        SettingsLockFullscreenAspect, y);
+    y += Scale(30);
     settingsControls_.maximizedTopDrag = checkbox(
         L"小窗全屏时拖动顶部空白可还原并移动（关闭后仅按钮可退出）",
         SettingsMaximizedTopDrag, y);
@@ -1618,6 +1638,7 @@ void Application::ReadSettingsControls() {
     state_.settings.snapThreshold = ParseInteger(settingsControls_.snap, old.snapThreshold);
     state_.settings.autoPauseOnHide = IsChecked(settingsControls_.autoPause);
     state_.settings.autoFitVideoFullscreen = IsChecked(settingsControls_.autoFitFullscreen);
+    state_.settings.lockVideoFullscreenAspect = IsChecked(settingsControls_.lockFullscreenAspect);
     state_.settings.maximizedTopDragEnabled = IsChecked(settingsControls_.maximizedTopDrag);
     state_.settings.disableHotkeysOnTyping = IsChecked(settingsControls_.typing);
     state_.settings.useSystemTray = IsChecked(settingsControls_.tray);
@@ -1631,6 +1652,8 @@ void Application::ReadSettingsControls() {
     state_.settings.renderMode = static_cast<RenderMode>(ComboValue(settingsControls_.renderMode));
     state_.settings.themeMode = static_cast<ThemeMode>(ComboValue(settingsControls_.theme));
     state_.settings.Clamp();
+    EnableWindow(settingsControls_.lockFullscreenAspect,
+                 state_.settings.autoFitVideoFullscreen ? TRUE : FALSE);
 
     if (old.themeMode != state_.settings.themeMode) {
         theme_.SetMode(state_.settings.themeMode);
@@ -1647,6 +1670,10 @@ void Application::ReadSettingsControls() {
         old.backgroundMediaHotkeys != state_.settings.backgroundMediaHotkeys) {
         RefreshHotkeys();
     }
+    if (!old.autoFitVideoFullscreen && state_.settings.autoFitVideoFullscreen &&
+        windowModes_.IsWebFullscreen()) {
+        HandleWebFullscreenChanged();
+    }
     SaveConfiguration();
 }
 
@@ -1658,6 +1685,9 @@ void Application::RefreshSettingsControls() {
     SetWindowTextW(settingsControls_.home, state_.settings.homeUrl.c_str());
     SetCheck(settingsControls_.autoPause, state_.settings.autoPauseOnHide);
     SetCheck(settingsControls_.autoFitFullscreen, state_.settings.autoFitVideoFullscreen);
+    SetCheck(settingsControls_.lockFullscreenAspect, state_.settings.lockVideoFullscreenAspect);
+    EnableWindow(settingsControls_.lockFullscreenAspect,
+                 state_.settings.autoFitVideoFullscreen ? TRUE : FALSE);
     SetCheck(settingsControls_.maximizedTopDrag, state_.settings.maximizedTopDragEnabled);
     SetCheck(settingsControls_.typing, state_.settings.disableHotkeysOnTyping);
     SetCheck(settingsControls_.tray, state_.settings.useSystemTray);
@@ -1786,7 +1816,7 @@ LRESULT Application::HandleSettingsMessage(HWND window, UINT message, WPARAM wPa
         }
         if (id == SettingsAbout) {
             MessageBoxW(window,
-                L"小窗浏览器 v1.4.0\n\n"
+                L"小窗浏览器 v1.4.1 测试版\n\n"
                 L"专为单屏玩家打造的 Windows 画中画浏览器\n"
                 L"C++20 / Win32 / WebView2 1.0.4078.44\n\n"
                 L"https://github.com/azurplain/Mini-Window-Browser",

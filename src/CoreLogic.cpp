@@ -122,6 +122,19 @@ bool ShouldInspectTextInputProcess(bool foregroundIsApplication, bool externalOb
     return foregroundIsApplication || externalObservationArmed;
 }
 
+bool ShouldApplyWebTypingGuard(bool webTyping, bool applicationForeground) {
+    return webTyping && applicationForeground;
+}
+
+bool IsUsableTextCaret(const RECT& caretRect, const RECT& clientRect,
+                       bool caretOwnsKeyboardFocus) {
+    if (!caretOwnsKeyboardFocus || caretRect.bottom <= caretRect.top) return false;
+    if (clientRect.right <= clientRect.left || clientRect.bottom <= clientRect.top) return false;
+    return caretRect.left >= clientRect.left && caretRect.left <= clientRect.right &&
+        caretRect.right >= clientRect.left && caretRect.right <= clientRect.right &&
+        caretRect.top >= clientRect.top && caretRect.bottom <= clientRect.bottom;
+}
+
 bool IsHoleMaskColumnTransparent(int coordinate, int transparencyPercent) {
     transparencyPercent = std::clamp(transparencyPercent, 0, 100);
     if (transparencyPercent == 0) return false;
@@ -190,6 +203,47 @@ SIZE CalculateAspectFitWindowSize(int preferredWidth, int chromeHeight, double a
             static_cast<int>(std::lround(std::max(1, height - chromeHeight) * aspectRatio))));
     }
     return SIZE{width, std::clamp(height, 1, maximumHeight)};
+}
+
+bool ShouldApplyVideoFullscreenFit(WindowMode visibleMode, bool webFullscreen,
+                                   bool autoFitEnabled, double aspectRatio) {
+    return visibleMode == WindowMode::Normal && webFullscreen && autoFitEnabled &&
+        std::isfinite(aspectRatio) && aspectRatio > 0.1 && aspectRatio < 10.0;
+}
+
+RECT PositionAspectFitRect(const RECT& currentRect, SIZE targetSize,
+                           const RECT& monitorRect, const RECT& workArea,
+                           int edgeThreshold) {
+    const int monitorWidth = std::max(1, static_cast<int>(monitorRect.right - monitorRect.left));
+    const int monitorHeight = std::max(1, static_cast<int>(monitorRect.bottom - monitorRect.top));
+    const int width = std::clamp(static_cast<int>(targetSize.cx), 1, monitorWidth);
+    const int height = std::clamp(static_cast<int>(targetSize.cy), 1, monitorHeight);
+    edgeThreshold = std::max(0, edgeThreshold);
+
+    const auto edgeDistance = [](int value, int monitorEdge, int workEdge) {
+        return std::min(std::abs(value - monitorEdge), std::abs(value - workEdge));
+    };
+    const int leftDistance = edgeDistance(currentRect.left, monitorRect.left, workArea.left);
+    const int rightDistance = edgeDistance(currentRect.right, monitorRect.right, workArea.right);
+    const int topDistance = edgeDistance(currentRect.top, monitorRect.top, workArea.top);
+    const int bottomDistance = edgeDistance(currentRect.bottom, monitorRect.bottom, workArea.bottom);
+
+    int left = currentRect.left +
+        ((currentRect.right - currentRect.left) - width) / 2;
+    if (std::min(leftDistance, rightDistance) <= edgeThreshold) {
+        left = leftDistance <= rightDistance ? monitorRect.left : monitorRect.right - width;
+    }
+    int top = currentRect.top +
+        ((currentRect.bottom - currentRect.top) - height) / 2;
+    if (std::min(topDistance, bottomDistance) <= edgeThreshold) {
+        top = topDistance <= bottomDistance ? monitorRect.top : monitorRect.bottom - height;
+    }
+
+    left = std::clamp(left, static_cast<int>(monitorRect.left),
+                      static_cast<int>(monitorRect.right) - width);
+    top = std::clamp(top, static_cast<int>(monitorRect.top),
+                     static_cast<int>(monitorRect.bottom) - height);
+    return RECT{left, top, left + width, top + height};
 }
 
 RECT ConstrainAspectSizingRect(RECT proposedRect, UINT sizingEdge, int chromeHeight,

@@ -37,8 +37,8 @@ IDI_SMALL               ICON         "assets\\XiaoChuang.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,4,1,0
- PRODUCTVERSION 1,4,1,0
+ FILEVERSION 1,4,2,0
+ PRODUCTVERSION 1,4,2,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -55,12 +55,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "AzurPlain\0"
             VALUE "FileDescription", "小窗浏览器 - Windows 画中画浏览器\0"
-            VALUE "FileVersion", "1.4.1.0\0"
+            VALUE "FileVersion", "1.4.2.0\0"
             VALUE "InternalName", "XiaoChuang\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 AzurPlain\0"
             VALUE "OriginalFilename", "XiaoChuang.exe\0"
             VALUE "ProductName", "小窗浏览器\0"
-            VALUE "ProductVersion", "1.4.1\0"
+            VALUE "ProductVersion", "1.4.2\0"
         END
     END
     BLOCK "VarFileInfo"
@@ -110,7 +110,7 @@ CAPTION "关于 小窗"
 FONT 9, "MS Shell Dlg"
 BEGIN
     ICON            IDI_MY,IDC_STATIC,14,14,21,20
-    LTEXT           "小窗浏览器, 版本 1.4.1",IDC_STATIC,42,14,114,8,SS_NOPREFIX
+    LTEXT           "小窗浏览器, 版本 1.4.2",IDC_STATIC,42,14,114,8,SS_NOPREFIX
     LTEXT           "版权所有(c) 2026",IDC_STATIC,42,26,114,8
     DEFPUSHBUTTON   "确定",IDOK,113,41,50,14,WS_GROUP
 END

@@ -46,7 +46,7 @@ std::wstring BuildSystemDiagnostics(const AppState& state,
         }
     }
     std::wostringstream output;
-    output << L"Mini Window Browser 1.4.1 test\r\n"
+    output << L"Mini Window Browser 1.4.2\r\n"
            << L"Windows: " << version.dwMajorVersion << L'.' << version.dwMinorVersion
            << L" build " << version.dwBuildNumber << L"\r\n"
            << L"HAGS: " << HagsState() << L"\r\n"

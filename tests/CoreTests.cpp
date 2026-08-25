@@ -136,6 +136,14 @@ void TestInputAndMediaSelection() {
     Check(!ShouldInspectTextInputProcess(false, false), L"启动时忽略旧外部窗口的遗留输入焦点");
     Check(ShouldInspectTextInputProcess(false, true), L"新外部焦点事件后启用跨程序输入保护");
     Check(ShouldInspectTextInputProcess(true, false), L"应用自身输入控件无需等待外部焦点事件");
+    Check(ShouldApplyWebTypingGuard(true, true), L"小窗前台网页输入框触发输入保护");
+    Check(!ShouldApplyWebTypingGuard(true, false), L"小窗失焦后不保留网页输入状态阻断媒体热键");
+    Check(!IsUsableTextCaret(RECT{0, 0, 0, 0}, RECT{0, 0, 800, 600}, true),
+          L"外部窗口零尺寸残留光标不误判为输入");
+    Check(!IsUsableTextCaret(RECT{10, 10, 11, 28}, RECT{0, 0, 800, 600}, false),
+          L"不拥有键盘焦点的光标不触发输入保护");
+    Check(IsUsableTextCaret(RECT{10, 10, 11, 28}, RECT{0, 0, 800, 600}, true),
+          L"焦点窗口内有效文本光标触发输入保护");
     for (const int transparency : {0, 1, 25, 50, 99, 100}) {
         int transparentColumns = 0;
         for (int coordinate = 0; coordinate < 100; ++coordinate) {
@@ -198,6 +206,17 @@ void TestWindowGeometryHelpers() {
     Check(wide.cx == 1000 && wide.cy == 631, L"16:9 视频自动计算小窗高度");
     const SIZE constrained = CalculateAspectFitWindowSize(1900, 68, 1.0, 1920, 1040);
     Check(constrained.cx == 972 && constrained.cy == 1040, L"视频比例适配不超出工作区");
+    Check(!ShouldApplyVideoFullscreenFit(WindowMode::Maximized, true, true, 16.0 / 9.0),
+          L"小窗全屏期间记录比例但暂不调整窗口");
+    Check(ShouldApplyVideoFullscreenFit(WindowMode::Normal, true, true, 16.0 / 9.0),
+          L"退出小窗全屏后仍在网页全屏时立即应用比例");
+    const RECT monitor{0, 0, 1920, 1080};
+    const RECT taskbarWork{0, 0, 1920, 1040};
+    const RECT bottomRight = PositionAspectFitRect(
+        RECT{1420, 560, 1920, 1040}, SIZE{800, 518}, monitor, taskbarWork, 20);
+    Check(bottomRight.left == 1120 && bottomRight.top == 562 &&
+          bottomRight.right == 1920 && bottomRight.bottom == 1080,
+          L"视频比例适配保持显示器右下角锚定而不抬到任务栏上方");
     const RECT widthDriven = ConstrainAspectSizingRect(
         RECT{100, 100, 900, 900}, WMSZ_RIGHT, 68, 16.0 / 9.0);
     Check(widthDriven.left == 100 && widthDriven.right == 900 &&

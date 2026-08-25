@@ -71,6 +71,9 @@ bool IsEditableClassName(std::wstring className);
 bool IsLikelyAutomationTextInput(bool semanticTextControl, bool keyboardFocusable,
                                  bool writableValuePattern);
 bool ShouldInspectTextInputProcess(bool foregroundIsApplication, bool externalObservationArmed);
+bool ShouldApplyWebTypingGuard(bool webTyping, bool applicationForeground);
+bool IsUsableTextCaret(const RECT& caretRect, const RECT& clientRect,
+                       bool caretOwnsKeyboardFocus);
 bool IsHoleMaskColumnTransparent(int coordinate, int transparencyPercent);
 std::wstring TrimWhitespace(std::wstring value);
 bool HasPresetNameConflict(const std::vector<std::wstring>& names,
@@ -80,6 +83,11 @@ RECT CalculateRestoredDragRect(const RECT& maximizedRect, const RECT& normalRect
                                POINT cursor, const RECT& workArea, int chromeHeight);
 SIZE CalculateAspectFitWindowSize(int preferredWidth, int chromeHeight, double aspectRatio,
                                   int maximumWidth, int maximumHeight);
+bool ShouldApplyVideoFullscreenFit(WindowMode visibleMode, bool webFullscreen,
+                                   bool autoFitEnabled, double aspectRatio);
+RECT PositionAspectFitRect(const RECT& currentRect, SIZE targetSize,
+                           const RECT& monitorRect, const RECT& workArea,
+                           int edgeThreshold);
 RECT ConstrainAspectSizingRect(RECT proposedRect, UINT sizingEdge, int chromeHeight,
                                double aspectRatio);
 

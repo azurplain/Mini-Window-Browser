@@ -53,7 +53,7 @@ private:
     RECT CurrentMonitorRect(bool workArea) const;
     BYTE ConfiguredAlpha() const;
     void ClearRegionAndOpacity() const;
-    RECT EnsureVisible(RECT rect) const;
+    RECT EnsureVisible(RECT rect, bool useWorkArea = true) const;
 
     HWND window_ = nullptr;
     AppSettings* settings_ = nullptr;

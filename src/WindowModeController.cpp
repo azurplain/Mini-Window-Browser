@@ -51,6 +51,10 @@ void WindowModeController::ToggleMaximized() {
     if (visibleMode_ == WindowMode::Maximized) {
         visibleMode_ = WindowMode::Normal;
         ApplyVisibleMode(visibleMode_, true);
+        if (ShouldApplyVideoFullscreenFit(visibleMode_, webFullscreen_,
+                settings_ && settings_->autoFitVideoFullscreen, webFullscreenAspect_)) {
+            FitWebFullscreenAspect(webFullscreenAspect_);
+        }
     } else {
         UpdateNormalRectFromWindow();
         visibleMode_ = WindowMode::Maximized;
@@ -117,7 +121,7 @@ void WindowModeController::LeaveWebFullscreen() {
     if (!videoFitActive_) return;
 
     videoFitActive_ = false;
-    normalRect_ = EnsureVisible(preVideoFitRect_);
+    normalRect_ = EnsureVisible(preVideoFitRect_, false);
     if (visibleMode_ == WindowMode::Normal && !hidden_) {
         ApplyVisibleMode(visibleMode_, true);
     }
@@ -127,7 +131,8 @@ void WindowModeController::FitWebFullscreenAspect(double aspectRatio) {
     if (!window_ || !webFullscreen_ || !std::isfinite(aspectRatio) ||
         aspectRatio <= 0.1 || aspectRatio >= 10.0) return;
     webFullscreenAspect_ = aspectRatio;
-    if (hidden_ || visibleMode_ != WindowMode::Normal) return;
+    if (hidden_ || !ShouldApplyVideoFullscreenFit(visibleMode_, webFullscreen_,
+            settings_ && settings_->autoFitVideoFullscreen, aspectRatio)) return;
 
     RECT current{};
     if (!GetWindowRect(window_, &current)) return;
@@ -136,18 +141,13 @@ void WindowModeController::FitWebFullscreenAspect(double aspectRatio) {
         videoFitActive_ = true;
     }
 
+    const RECT monitor = CurrentMonitorRect(false);
     const RECT work = CurrentMonitorRect(true);
     const SIZE target = CalculateAspectFitWindowSize(
         current.right - current.left, chromeHeight_, aspectRatio,
-        work.right - work.left, work.bottom - work.top);
-    RECT desired{
-        current.left + ((current.right - current.left) - target.cx) / 2,
-        current.top + ((current.bottom - current.top) - target.cy) / 2,
-        0,
-        0};
-    desired.right = desired.left + target.cx;
-    desired.bottom = desired.top + target.cy;
-    desired = EnsureVisible(desired);
+        monitor.right - monitor.left, monitor.bottom - monitor.top);
+    const RECT desired = PositionAspectFitRect(
+        current, target, monitor, work, settings_ ? settings_->snapThreshold : 0);
     SetWindowPos(window_, HWND_TOPMOST, desired.left, desired.top,
                  desired.right - desired.left, desired.bottom - desired.top,
                  SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
@@ -412,11 +412,11 @@ void WindowModeController::ClearRegionAndOpacity() const {
     SetLayeredWindowAttributes(window_, 0, 255, LWA_ALPHA);
 }
 
-RECT WindowModeController::EnsureVisible(RECT rect) const {
+RECT WindowModeController::EnsureVisible(RECT rect, bool useWorkArea) const {
     HMONITOR monitor = MonitorFromRect(&rect, MONITOR_DEFAULTTONEAREST);
     MONITORINFO info{sizeof(info)};
     if (!GetMonitorInfoW(monitor, &info)) return rect;
-    const RECT work = info.rcWork;
+    const RECT work = useWorkArea ? info.rcWork : info.rcMonitor;
     int width = std::clamp(static_cast<int>(rect.right - rect.left), 360,
                            static_cast<int>(work.right - work.left));
     int height = std::clamp(static_cast<int>(rect.bottom - rect.top), 240,

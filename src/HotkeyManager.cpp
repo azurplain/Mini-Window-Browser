@@ -80,13 +80,18 @@ void HotkeyManager::Refresh(bool hidden, bool backgroundMediaHotkeys, bool input
     if (!window_ || !bindings_) return;
 
     CancelActiveGesture();
+    // A foreground transition can make the low-level key-up arrive after the
+    // registration set changes. Do not let that stale state block the next
+    // global seek press when focus is outside the browser.
+    keyboardDown_.fill(false);
+    mouseDown_.fill(false);
     for (const HotkeyBinding& binding : *bindings_) {
         UnregisterHotKey(window_, binding.id);
     }
     for (size_t index = 0; index < kHotkeyCount; ++index) {
         const HotkeyAction action = static_cast<HotkeyAction>(index);
         const HotkeyBinding& binding = (*bindings_)[index];
-        if (inputSuppressed_ && action != HotkeyAction::ToggleHidden) continue;
+        if (inputSuppressed_) continue;
         if (!IsActionActive(action) || IsMouseKey(binding.virtualKey)) continue;
         if (!RegisterHotKey(window_, binding.id, binding.modifiers | MOD_NOREPEAT, binding.virtualKey)) {
             registrationErrors_.push_back(binding.displayName + L"（" + HotkeyDisplayText(binding) + L"）");
@@ -100,6 +105,15 @@ bool HotkeyManager::HandleHotkeyMessage(int identifier) {
     if (!action || !IsActionActive(*action)) return false;
     const HotkeyBinding& binding = (*bindings_)[HotkeyIndex(*action)];
     if (*action == HotkeyAction::SeekBackward || *action == HotkeyAction::SeekForward) {
+        // When focus is outside the browser, the low-level hook owns both the
+        // key-down and key-up messages. Ignore a duplicate WM_HOTKEY so it
+        // cannot replace that message-tracked gesture with an async-state one.
+        const bool hookGesturePending = pending_ && pending_->releaseByMessage &&
+            !pending_->mouse && pending_->virtualKey == binding.virtualKey;
+        if (hookGesturePending ||
+            (binding.virtualKey < keyboardDown_.size() && keyboardDown_[binding.virtualKey])) {
+            return true;
+        }
         BeginGesture(*action, binding.virtualKey, false);
     } else {
         TriggerAction(*action);
@@ -174,7 +188,7 @@ bool HotkeyManager::HandleKeyboardMessage(WPARAM virtualKeyValue, LPARAM packedS
     const auto action = FindKeyboardAction(virtualKey, modifiers);
     if (!action) return false;
     if (*action == HotkeyAction::SeekBackward || *action == HotkeyAction::SeekForward) {
-        BeginGesture(*action, virtualKey, false);
+        BeginGesture(*action, virtualKey, false, true);
     } else {
         TriggerAction(*action);
     }
@@ -186,7 +200,8 @@ void HotkeyManager::Tick() {
         if (window_) KillTimer(window_, kHotkeyHoldTimerId);
         return;
     }
-    if (!pending_->mouse && (GetAsyncKeyState(static_cast<int>(pending_->virtualKey)) & 0x8000) == 0) {
+    if (!pending_->mouse && !pending_->releaseByMessage &&
+        (GetAsyncKeyState(static_cast<int>(pending_->virtualKey)) & 0x8000) == 0) {
         ReleaseGesture();
         return;
     }
@@ -348,7 +363,7 @@ bool HotkeyManager::NeedsRawMouseInput() const {
 }
 
 bool HotkeyManager::IsActionActive(HotkeyAction action) const {
-    if (inputSuppressed_ && action != HotkeyAction::ToggleHidden) return false;
+    if (inputSuppressed_) return false;
     if (!hidden_) return true;
     if (action == HotkeyAction::ToggleHidden) return true;
     return backgroundMediaHotkeys_ && IsMediaAction(action);
@@ -398,9 +413,10 @@ void HotkeyManager::TriggerAction(HotkeyAction action) {
     callback_(action, HotkeyGesture::Trigger);
 }
 
-void HotkeyManager::BeginGesture(HotkeyAction action, UINT virtualKey, bool mouse) {
+void HotkeyManager::BeginGesture(HotkeyAction action, UINT virtualKey, bool mouse,
+                                 bool releaseByMessage) {
     CancelActiveGesture();
-    pending_ = PendingGesture{action, virtualKey, mouse, false, GetTickCount64()};
+    pending_ = PendingGesture{action, virtualKey, mouse, releaseByMessage, false, GetTickCount64()};
     SetTimer(window_, kHotkeyHoldTimerId, 20, nullptr);
 }
 

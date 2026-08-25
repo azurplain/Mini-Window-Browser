@@ -119,7 +119,13 @@ void InputGuard::SetWebTyping(bool typing) {
 }
 
 bool InputGuard::Refresh() {
-    const bool next = webTyping_ || DetectSystemTextInput();
+    DWORD foregroundProcessId = 0;
+    if (const HWND foreground = GetForegroundWindow()) {
+        GetWindowThreadProcessId(foreground, &foregroundProcessId);
+    }
+    const bool applicationForeground = foregroundProcessId == GetCurrentProcessId();
+    const bool next = ShouldApplyWebTypingGuard(webTyping_, applicationForeground) ||
+        DetectSystemTextInput();
     if (next == typing_) return typing_;
     typing_ = next;
     if (callback_) callback_(typing_);
@@ -154,11 +160,18 @@ bool InputGuard::DetectSystemTextInput() const {
     }
     GUITHREADINFO info{sizeof(info)};
     if (GetGUIThreadInfo(threadId, &info)) {
-        if (info.hwndCaret && IsWindowVisible(info.hwndCaret)) return true;
         if (info.hwndFocus) {
             wchar_t className[128]{};
             GetClassNameW(info.hwndFocus, className, static_cast<int>(std::size(className)));
             if (IsEditableClassName(className)) return true;
+        }
+        if (info.hwndCaret && info.hwndFocus == info.hwndCaret &&
+            IsWindowVisible(info.hwndCaret)) {
+            RECT client{};
+            if (GetClientRect(info.hwndCaret, &client) &&
+                IsUsableTextCaret(info.rcCaret, client, true)) {
+                return true;
+            }
         }
     }
     // WebView inputs report their focus through the injected focusin/focusout bridge.

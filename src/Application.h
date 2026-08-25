@@ -77,6 +77,11 @@ private:
     static constexpr UINT kShowRegistrationErrors = WM_APP + 61;
     static constexpr UINT kCloseTabMessage = WM_APP + 62;
     static constexpr UINT kShowExistingInstance = WM_APP + 63;
+#ifdef XIAOCHUANG_SMOKE_TEST
+    static constexpr UINT kSetWebTypingSmokeMessage = WM_APP + 64;
+    static constexpr UINT kSetWebFullscreenSmokeMessage = WM_APP + 65;
+    static constexpr UINT kGetHotkeyCountSmokeMessage = WM_APP + 66;
+#endif
     static constexpr UINT_PTR kInputFallbackTimerId = 4403;
     static constexpr UINT_PTR kSettingsSaveTimerId = 4404;
     static constexpr int kTrayIconId = 1;
@@ -262,6 +267,9 @@ private:
         std::array<HWND, kHotkeyCount> hotkeys{};
     } settingsControls_;
     std::optional<HotkeyAction> captureAction_;
+#ifdef XIAOCHUANG_SMOKE_TEST
+    std::array<UINT, kHotkeyCount> smokeHotkeyCounts_{};
+#endif
     bool updatingSettingsControls_ = false;
     bool waitingForTabContent_ = false;
     UINT64 waitingNavigationId_ = 0;

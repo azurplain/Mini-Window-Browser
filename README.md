@@ -97,7 +97,7 @@
 
 ### 下载与运行
 
-1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.1-x64.zip`。
+1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.2-x64.zip`。
 2. 将压缩包完整解压到普通可写目录，不要只从压缩包内直接运行 EXE。
 3. 保持 `XiaoChuang.exe` 与 `WebView2Loader.dll` 位于同一目录。
 4. 双击 `XiaoChuang.exe`，在 Windows UAC 窗口中选择“是”。
@@ -117,7 +117,7 @@
 | `6` | 快进 | 点按前进 5 秒，长按临时加速 |
 | `7` / `8` | 上一集 / 下一集 | 优先调用网站适配器 |
 
-所有快捷键都可在设置中改成键盘组合、鼠标中键、鼠标侧键 1 或侧键 2。输入保护开启时，网页输入框、地址栏和可识别的外部编辑控件会暂停媒体及沉浸热键；隐藏/显示键始终保留。
+所有快捷键都可在设置中改成键盘组合、鼠标中键、鼠标侧键 1 或侧键 2。输入保护开启时，网页输入框、地址栏和可识别的外部编辑控件会暂停包括隐藏/显示在内的全部小窗热键，离开输入状态后自动恢复。
 
 ## 主要使用方式
 

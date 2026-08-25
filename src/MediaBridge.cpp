@@ -29,7 +29,7 @@ const wchar_t* MediaBridge::BootstrapScript() {
 
   let lastTyping = null;
   const publishTyping = () => {
-    const typing = isEditable(document.activeElement);
+    const typing = document.hasFocus() && isEditable(document.activeElement);
     if (typing === lastTyping) return;
     lastTyping = typing;
     try { chrome.webview.postMessage(typing ? 'MWB_TYPING:1' : 'MWB_TYPING:0'); } catch (_) {}

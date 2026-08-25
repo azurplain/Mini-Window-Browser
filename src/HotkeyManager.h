@@ -52,6 +52,7 @@ private:
         HotkeyAction action = HotkeyAction::SeekBackward;
         UINT virtualKey = 0;
         bool mouse = false;
+        bool releaseByMessage = false;
         bool holding = false;
         ULONGLONG startedAt = 0;
     };
@@ -70,7 +71,8 @@ private:
     std::optional<HotkeyAction> FindMouseAction(UINT virtualKey, UINT modifiers) const;
     std::optional<HotkeyAction> FindKeyboardAction(UINT virtualKey, UINT modifiers) const;
     void TriggerAction(HotkeyAction action);
-    void BeginGesture(HotkeyAction action, UINT virtualKey, bool mouse);
+    void BeginGesture(HotkeyAction action, UINT virtualKey, bool mouse,
+                      bool releaseByMessage = false);
     void ReleaseGesture();
     static UINT CurrentModifiers();
     static bool IsMouseKey(UINT virtualKey);

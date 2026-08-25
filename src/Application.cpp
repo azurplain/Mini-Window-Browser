@@ -328,21 +328,40 @@ void Application::LayoutMainControls() {
         const int margin = Scale(7);
         const int smallWidth = Scale(34);
         const int textWidth = Scale(52);
-        int xRight = width - margin;
-        auto placeRight = [&](HWND button, int buttonWidth) {
-            xRight -= buttonWidth;
-            MoveWindow(button, xRight, navigationY + Scale(4), buttonWidth, navigationButtonHeight, TRUE);
-            xRight -= gap;
-        };
-        placeRight(settingsButton_, textWidth);
-        placeRight(presetButton_, textWidth);
-        placeRight(bookmarkButton_, textWidth);
-        placeRight(starButton_, smallWidth);
-        placeRight(goButton_, textWidth);
-        const int addressWidth = std::max(Scale(120), xRight - margin);
-        MoveWindow(addressEdit_, margin + Scale(9), navigationY + Scale(7),
-                   std::max(Scale(80), addressWidth - gap - Scale(20)),
-                   navigationRowHeight_ - Scale(14), TRUE);
+        const bool compact = width < Scale(480);
+        const HWND optionalButtons[] = {
+            starButton_, bookmarkButton_, presetButton_, settingsButton_};
+        for (const HWND button : optionalButtons) {
+            ShowWindow(button, compact ? SW_HIDE : SW_SHOWNA);
+        }
+        ShowWindow(goButton_, SW_SHOWNA);
+        if (compact) {
+            const int compactMargin = Scale(4);
+            const int compactGoWidth = Scale(38);
+            const int goX = std::max(compactMargin, width - compactMargin - compactGoWidth);
+            MoveWindow(goButton_, goX, navigationY + Scale(4), compactGoWidth,
+                       navigationButtonHeight, TRUE);
+            MoveWindow(addressEdit_, compactMargin, navigationY + Scale(7),
+                       std::max(1, goX - compactMargin - Scale(4)),
+                       navigationRowHeight_ - Scale(14), TRUE);
+        } else {
+            int xRight = width - margin;
+            auto placeRight = [&](HWND button, int buttonWidth) {
+                xRight -= buttonWidth;
+                MoveWindow(button, xRight, navigationY + Scale(4), buttonWidth,
+                           navigationButtonHeight, TRUE);
+                xRight -= gap;
+            };
+            placeRight(settingsButton_, textWidth);
+            placeRight(presetButton_, textWidth);
+            placeRight(bookmarkButton_, textWidth);
+            placeRight(starButton_, smallWidth);
+            placeRight(goButton_, textWidth);
+            const int addressWidth = std::max(Scale(120), xRight - margin);
+            MoveWindow(addressEdit_, margin + Scale(9), navigationY + Scale(7),
+                       std::max(Scale(80), addressWidth - gap - Scale(20)),
+                       navigationRowHeight_ - Scale(14), TRUE);
+        }
     }
     ResizeWebView();
     InvalidateRect(mainWindow_, nullptr, FALSE);
@@ -433,7 +452,8 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         break;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-        info->ptMinTrackSize = {Scale(520), Scale(320)};
+        info->ptMinTrackSize = windowModes_.IsImmersive()
+            ? POINT{Scale(64), Scale(64)} : POINT{Scale(160), Scale(120)};
         return 0;
     }
     case WM_DPICHANGED: {
@@ -597,6 +617,22 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
     case kShowExistingInstance:
         RestoreFromUserAction();
         return 0;
+#ifdef XIAOCHUANG_SMOKE_TEST
+    case kSetWebTypingSmokeMessage:
+        webTyping_ = wParam != 0;
+        inputGuard_.SetWebTyping(webTyping_);
+        return 0;
+    case kSetWebFullscreenSmokeMessage:
+        if (wParam != 0) {
+            windowModes_.EnterWebFullscreen();
+            windowModes_.FitWebFullscreenAspect(16.0 / 9.0);
+        } else {
+            windowModes_.LeaveWebFullscreen();
+        }
+        return 0;
+    case kGetHotkeyCountSmokeMessage:
+        return wParam < kHotkeyCount ? smokeHotkeyCounts_[wParam] : 0;
+#endif
     case WM_CLOSE:
         DestroyWindow(window);
         return 0;
@@ -972,14 +1008,17 @@ void Application::ExecuteScript(const std::wstring& script) {
 }
 
 void Application::ExecuteMediaAction(HotkeyAction action, HotkeyGesture gesture) {
-    // The boss key must remain available even when an edit control owns focus;
-    // otherwise hiding from the address bar leaves no way to show the window.
+    // A hold-stop is cleanup rather than a new user action, so it must still
+    // restore playback state if input protection becomes active mid-gesture.
+    if (inputGuard_.IsTyping() && state_.settings.disableHotkeysOnTyping &&
+        gesture != HotkeyGesture::HoldStop) return;
+#ifdef XIAOCHUANG_SMOKE_TEST
+    ++smokeHotkeyCounts_[HotkeyIndex(action)];
+#endif
     if (action == HotkeyAction::ToggleHidden && gesture == HotkeyGesture::Trigger) {
         ToggleHidden();
         return;
     }
-    if (inputGuard_.IsTyping() && state_.settings.disableHotkeysOnTyping &&
-        gesture != HotkeyGesture::HoldStop) return;
     if (action == HotkeyAction::Immersion && gesture == HotkeyGesture::Trigger) {
         if (!windowModes_.IsHidden()) ToggleImmersion();
         return;
@@ -1816,7 +1855,7 @@ LRESULT Application::HandleSettingsMessage(HWND window, UINT message, WPARAM wPa
         }
         if (id == SettingsAbout) {
             MessageBoxW(window,
-                L"小窗浏览器 v1.4.1 测试版\n\n"
+                L"小窗浏览器 v1.4.2\n\n"
                 L"专为单屏玩家打造的 Windows 画中画浏览器\n"
                 L"C++20 / Win32 / WebView2 1.0.4078.44\n\n"
                 L"https://github.com/azurplain/Mini-Window-Browser",

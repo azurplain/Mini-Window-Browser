@@ -21,7 +21,20 @@ using System;
 using System.Runtime.InteropServices;
 public static class XcNative {
     [StructLayout(LayoutKind.Sequential)]
+    public struct POINT { public int X, Y; }
+    [StructLayout(LayoutKind.Sequential)]
     public struct RECT { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MINMAXINFO {
+        public POINT Reserved, MaxSize, MaxPosition, MinTrackSize, MaxTrackSize;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MONITORINFO {
+        public uint Size;
+        public RECT Monitor;
+        public RECT Work;
+        public uint Flags;
+    }
     [StructLayout(LayoutKind.Sequential)]
     public struct MOUSEINPUT {
         public int dx, dy;
@@ -35,6 +48,12 @@ public static class XcNative {
     }
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     public static extern IntPtr FindWindow(string cls, string title);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern IntPtr CreateWindowEx(uint exStyle, string cls, string title,
+        uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu,
+        IntPtr instance, IntPtr parameter);
+    [DllImport("user32.dll")]
+    public static extern bool DestroyWindow(IntPtr h);
     [DllImport("user32.dll", SetLastError=true)]
     public static extern bool PostMessage(IntPtr h, uint m, UIntPtr w, IntPtr l);
     [DllImport("user32.dll")]
@@ -59,8 +78,19 @@ public static class XcNative {
     public static extern IntPtr GetDlgItem(IntPtr h, int id);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder text, int count);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern bool SetWindowText(IntPtr h, string text);
+    [DllImport("user32.dll", SetLastError=true)]
+    public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y,
+        int width, int height, uint flags);
+    [DllImport("user32.dll")]
+    public static extern IntPtr MonitorFromWindow(IntPtr h, uint flags);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)]
+    public static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")]
     public static extern IntPtr SetFocus(IntPtr h);
     [DllImport("user32.dll")]
@@ -85,6 +115,10 @@ public static class XcNative {
     public static extern bool UnregisterHotKey(IntPtr h, int id);
     [DllImport("user32.dll", SetLastError=true)]
     public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll")]
+    public static extern uint GetDpiForWindow(IntPtr h);
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr h, int attribute, out uint value, int size);
 }
@@ -140,9 +174,42 @@ function Send-XButton([uint32]$Button) {
         [Runtime.InteropServices.Marshal]::SizeOf([type][XcNative+INPUT]))
 }
 
+function Test-HotkeyAvailable([uint32]$VirtualKey) {
+    $registered = [XcNative]::RegisterHotKey([IntPtr]::Zero, 993, 0, $VirtualKey)
+    if ($registered) { [void][XcNative]::UnregisterHotKey([IntPtr]::Zero, 993) }
+    return $registered
+}
+
+function Send-KeyPress([byte]$VirtualKey) {
+    [XcNative]::keybd_event($VirtualKey, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 60
+    [XcNative]::keybd_event($VirtualKey, 0, 2, [UIntPtr]::Zero)
+}
+
+function Set-TestForeground([IntPtr]$Target) {
+    $currentThread = [XcNative]::GetCurrentThreadId()
+    $foreground = [XcNative]::GetForegroundWindow()
+    $foregroundProcess = 0u
+    $foregroundThread = if ($foreground -ne [IntPtr]::Zero) {
+        [XcNative]::GetWindowThreadProcessId($foreground, [ref]$foregroundProcess)
+    } else { 0u }
+    $attached = $foregroundThread -ne 0 -and $foregroundThread -ne $currentThread -and
+        [XcNative]::AttachThreadInput($currentThread, $foregroundThread, $true)
+    try {
+        [void][XcNative]::SetForegroundWindow($Target)
+        [void][XcNative]::SetFocus($Target)
+    } finally {
+        if ($attached) {
+            [void][XcNative]::AttachThreadInput($currentThread, $foregroundThread, $false)
+        }
+    }
+    return Wait-Condition { [XcNative]::GetForegroundWindow() -eq $Target }
+}
+
 $results = [ordered]@{}
 $process = Start-Process -FilePath (Join-Path $tempRoot 'XiaoChuang.exe') -WorkingDirectory $tempRoot -PassThru -WindowStyle Hidden
 $window = [IntPtr]::Zero
+$externalWindow = [IntPtr]::Zero
 try {
     $results.WindowCreated = Wait-Condition {
         $process.Refresh()
@@ -152,10 +219,105 @@ try {
     $window = $process.MainWindowHandle
     Start-Sleep -Milliseconds 1000
 
+    $minMaxPointer = [Runtime.InteropServices.Marshal]::AllocHGlobal(
+        [Runtime.InteropServices.Marshal]::SizeOf([type][XcNative+MINMAXINFO]))
+    try {
+        [Runtime.InteropServices.Marshal]::StructureToPtr(
+            [XcNative+MINMAXINFO]::new(), $minMaxPointer, $false)
+        [void][XcNative]::SendMessage($window, 0x0024, [UIntPtr]::Zero, $minMaxPointer)
+        $minMax = [Runtime.InteropServices.Marshal]::PtrToStructure(
+            $minMaxPointer, [type][XcNative+MINMAXINFO])
+        $dpi = [XcNative]::GetDpiForWindow($window)
+        $expectedMinWidth = [int]((160 * $dpi + 48) / 96)
+        $expectedMinHeight = [int]((120 * $dpi + 48) / 96)
+        $results.CompactMinimumWindowSize =
+            $minMax.MinTrackSize.X -eq $expectedMinWidth -and
+            $minMax.MinTrackSize.Y -eq $expectedMinHeight
+        $results.MinimumSizeProbe = "dpi=$dpi min=$($minMax.MinTrackSize.X)x$($minMax.MinTrackSize.Y) expected=${expectedMinWidth}x${expectedMinHeight}"
+    } finally {
+        [Runtime.InteropServices.Marshal]::FreeHGlobal($minMaxPointer)
+    }
+
     $registered = [XcNative]::RegisterHotKey([IntPtr]::Zero, 991, 0, 57)
     $results.StartupHideHotkeyOwned = -not $registered -and
         [Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 1409
     if ($registered) { [void][XcNative]::UnregisterHotKey([IntPtr]::Zero, 991) }
+
+    $currentThread = [XcNative]::GetCurrentThreadId()
+    $externalWindow = [XcNative]::CreateWindowEx(
+        0, 'EDIT', 'XC External Input', 0x10cf0080,
+        40, 40, 320, 120, [IntPtr]::Zero, [IntPtr]::Zero,
+        [IntPtr]::Zero, [IntPtr]::Zero)
+    $externalInputFocused = Set-TestForeground $externalWindow
+    $mediaKeyProtected = Wait-Condition { Test-HotkeyAvailable 53 } 5000
+    $hideKeyProtected = Wait-Condition { Test-HotkeyAvailable 57 } 5000
+    $hideCountBefore = [XcNative]::SendMessage(
+        $window, 0x8042, [UIntPtr]6, [IntPtr]::Zero).ToInt64()
+    $visibleBeforeProtectedHide = [XcNative]::IsWindowVisible($window)
+    Send-KeyPress 57
+    Start-Sleep -Milliseconds 200
+    $hideBlockedWhileTyping = $visibleBeforeProtectedHide -eq [XcNative]::IsWindowVisible($window)
+    $hideCountAfter = [XcNative]::SendMessage(
+        $window, 0x8042, [UIntPtr]6, [IntPtr]::Zero).ToInt64()
+    $hideBlockedWhileTyping = $hideBlockedWhileTyping -and $hideCountAfter -eq $hideCountBefore
+    if ($externalWindow -ne [IntPtr]::Zero) {
+        [void][XcNative]::DestroyWindow($externalWindow)
+        $externalWindow = [IntPtr]::Zero
+    }
+    $externalWindow = [XcNative]::CreateWindowEx(
+        0, 'STATIC', 'XC External Focus', 0x10cf0000,
+        40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
+        [IntPtr]::Zero, [IntPtr]::Zero)
+    $externalFocused = Set-TestForeground $externalWindow
+    $mediaHotkeyRestored = Wait-Condition {
+        -not (Test-HotkeyAvailable 53) -and
+        [Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 1409
+    } 5000
+    $seekCountBefore = [XcNative]::SendMessage(
+        $window, 0x8042, [UIntPtr]2, [IntPtr]::Zero).ToInt64()
+    Send-KeyPress 53
+    $externalSeekTriggered = Wait-Condition {
+        [XcNative]::SendMessage(
+            $window, 0x8042, [UIntPtr]2, [IntPtr]::Zero).ToInt64() -gt $seekCountBefore
+    } 5000
+    $holdProbes = @()
+    foreach ($holdCase in @(@(53, 2, 'backward'), @(54, 3, 'forward'))) {
+        $holdKey = [byte]$holdCase[0]
+        $holdAction = [int]$holdCase[1]
+        $holdBefore = [XcNative]::SendMessage(
+            $window, 0x8042, [UIntPtr]$holdAction, [IntPtr]::Zero).ToInt64()
+        [XcNative]::keybd_event($holdKey, 0, 0, [UIntPtr]::Zero)
+        $holdStarted = Wait-Condition {
+            [XcNative]::SendMessage(
+                $window, 0x8042, [UIntPtr]$holdAction, [IntPtr]::Zero).ToInt64() -gt $holdBefore
+        } 1200
+        $holdDuring = [XcNative]::SendMessage(
+            $window, 0x8042, [UIntPtr]$holdAction, [IntPtr]::Zero).ToInt64()
+        [XcNative]::keybd_event($holdKey, 0, 2, [UIntPtr]::Zero)
+        $holdStopped = Wait-Condition {
+            [XcNative]::SendMessage(
+                $window, 0x8042, [UIntPtr]$holdAction, [IntPtr]::Zero).ToInt64() -gt $holdDuring
+        } 1200
+        $holdAfter = [XcNative]::SendMessage(
+            $window, 0x8042, [UIntPtr]$holdAction, [IntPtr]::Zero).ToInt64()
+        $holdProbes += [pscustomobject]@{
+            Name = $holdCase[2]
+            Passed = $holdStarted -and $holdStopped -and $holdAfter -eq $holdBefore + 2
+            Counts = "$holdBefore->$holdDuring->$holdAfter"
+        }
+    }
+    $externalHoldsWork = @($holdProbes | Where-Object { -not $_.Passed }).Count -eq 0
+    $results.MediaHotkeysRestoreAfterExternalFocus = $externalInputFocused -and
+        $mediaKeyProtected -and $hideKeyProtected -and $hideBlockedWhileTyping -and
+        $externalFocused -and $mediaHotkeyRestored -and $externalSeekTriggered -and
+        $externalHoldsWork
+    $holdProbeText = ($holdProbes | ForEach-Object { "$($_.Name)=$($_.Passed):$($_.Counts)" }) -join ','
+    $results.MediaHotkeyFocusProbe = "inputFocused=$externalInputFocused mediaProtected=$mediaKeyProtected hideProtected=$hideKeyProtected hideBlocked=$hideBlockedWhileTyping hideCount=$hideCountBefore->$hideCountAfter external=$externalFocused restored=$mediaHotkeyRestored seekTriggered=$externalSeekTriggered holds=[$holdProbeText]"
+    if ($externalWindow -ne [IntPtr]::Zero) {
+        [void][XcNative]::DestroyWindow($externalWindow)
+        $externalWindow = [IntPtr]::Zero
+    }
+    [void][XcNative]::SetForegroundWindow($window)
 
     [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1010, [IntPtr]::Zero)
     $settingsShown = Wait-Condition {
@@ -315,12 +477,24 @@ try {
     Start-Sleep -Milliseconds 250
     $results.AddressFocusPrepared = $address -ne [IntPtr]::Zero
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    $results.InputProtectionBlocksHideHotkey = [XcNative]::IsWindowVisible($window)
+    $externalWindow = [XcNative]::CreateWindowEx(
+        0, 'STATIC', 'XC Hide Focus', 0x10cf0000,
+        40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
+        [IntPtr]::Zero, [IntPtr]::Zero)
+    [void](Set-TestForeground $externalWindow)
+    [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     $hidden = Wait-Condition { -not [XcNative]::IsWindowVisible($window) }
     Start-Sleep -Milliseconds 300
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     $shown = Wait-Condition { [XcNative]::IsWindowVisible($window) }
     $results.HideShowWithoutClick = $hidden -and $shown
     $results.HideShowProbe = "hidden=$hidden shown=$shown"
+    if ($externalWindow -ne [IntPtr]::Zero) {
+        [void][XcNative]::DestroyWindow($externalWindow)
+        $externalWindow = [IntPtr]::Zero
+    }
 
     [void][XcNative]::PostMessage($window, 0x10, [UIntPtr]::Zero, [IntPtr]::Zero)
     [void]$process.WaitForExit(8000)
@@ -333,6 +507,59 @@ try {
     $process.Refresh()
     $window = $process.MainWindowHandle
     Start-Sleep -Milliseconds 500
+
+    [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1010, [IntPtr]::Zero)
+    [void](Wait-Condition {
+        $popup = [XcNative]::GetLastActivePopup($window)
+        $popup -ne [IntPtr]::Zero -and $popup -ne $window -and [XcNative]::IsWindowVisible($popup)
+    })
+    $settings = [XcNative]::GetLastActivePopup($window)
+    $autoFit = [XcNative]::GetDlgItem($settings, 2017)
+    [void][XcNative]::SendMessage($autoFit, 0x00f1, [UIntPtr]1, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2017, $autoFit)
+    [void][XcNative]::PostMessage($settings, 0x10, [UIntPtr]::Zero, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 150
+
+    $monitorInfo = New-Object XcNative+MONITORINFO
+    $monitorInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][XcNative+MONITORINFO])
+    $monitor = [XcNative]::MonitorFromWindow($window, 2)
+    [void][XcNative]::GetMonitorInfo($monitor, [ref]$monitorInfo)
+    $normalWidth = [Math]::Min(900, $monitorInfo.Work.Right - $monitorInfo.Work.Left)
+    $normalHeight = [Math]::Min(600, $monitorInfo.Work.Bottom - $monitorInfo.Work.Top)
+    $normalLeft = $monitorInfo.Work.Right - $normalWidth
+    $normalTop = $monitorInfo.Work.Bottom - $normalHeight
+    [void][XcNative]::SetWindowPos($window, [IntPtr]::Zero,
+        $normalLeft, $normalTop, $normalWidth, $normalHeight, 0x0014)
+    [void][XcNative]::SendMessage($window, 0x0232, [UIntPtr]::Zero, [IntPtr]::Zero)
+    $beforeVideoFullscreen = New-Object XcNative+RECT
+    [void][XcNative]::GetWindowRect($window, [ref]$beforeVideoFullscreen)
+
+    [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1005, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 250
+    [void][XcNative]::PostMessage($window, 0x8041, [UIntPtr]1, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 150
+    [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1005, [IntPtr]::Zero)
+
+    $fittedAfterRestore = New-Object XcNative+RECT
+    $videoFitApplied = Wait-Condition {
+        [void][XcNative]::GetWindowRect($window, [ref]$fittedAfterRestore)
+        ($fittedAfterRestore.Right - $fittedAfterRestore.Left) -eq $normalWidth -and
+        $fittedAfterRestore.Bottom -eq $monitorInfo.Monitor.Bottom -and
+        ($fittedAfterRestore.Bottom - $fittedAfterRestore.Top) -ne $normalHeight
+    } 5000
+    [void][XcNative]::SendMessage($window, 0x0100, [UIntPtr]27, [IntPtr]::Zero)
+    $restoredAfterEscape = Wait-Condition {
+        $restored = New-Object XcNative+RECT
+        [void][XcNative]::GetWindowRect($window, [ref]$restored)
+        $restored.Left -eq $beforeVideoFullscreen.Left -and
+        $restored.Top -eq $beforeVideoFullscreen.Top -and
+        $restored.Right -eq $beforeVideoFullscreen.Right -and
+        $restored.Bottom -eq $beforeVideoFullscreen.Bottom
+    } 5000
+    $results.VideoFullscreenFitAfterLeavingWindowMaximized =
+        $videoFitApplied -and $restoredAfterEscape
+    $results.VideoFullscreenTransitionProbe =
+        "fit=$videoFitApplied fitted=$($fittedAfterRestore.Left),$($fittedAfterRestore.Top),$($fittedAfterRestore.Right),$($fittedAfterRestore.Bottom) monitorBottom=$($monitorInfo.Monitor.Bottom) restored=$restoredAfterEscape"
 
     $normal = New-Object XcNative+RECT
     [void][XcNative]::GetWindowRect($window, [ref]$normal)
@@ -377,6 +604,9 @@ try {
     [void]$process.WaitForExit(8000)
     $results.CleanExit = $process.HasExited -and $process.ExitCode -eq 0
 } finally {
+    if ($externalWindow -ne [IntPtr]::Zero) {
+        [void][XcNative]::DestroyWindow($externalWindow)
+    }
     if ($window -ne [IntPtr]::Zero -and [XcNative]::IsWindow($window)) {
         [void][XcNative]::PostMessage($window, 0x10, [UIntPtr]::Zero, [IntPtr]::Zero)
         [void]$process.WaitForExit(4000)

@@ -249,8 +249,9 @@ try {
         40, 40, 320, 120, [IntPtr]::Zero, [IntPtr]::Zero,
         [IntPtr]::Zero, [IntPtr]::Zero)
     $externalInputFocused = Set-TestForeground $externalWindow
-    $mediaKeyProtected = Wait-Condition { Test-HotkeyAvailable 53 } 5000
-    $hideKeyProtected = Wait-Condition { Test-HotkeyAvailable 57 } 5000
+    $allHotkeysProtected = Wait-Condition {
+        @((48, 192, 53, 54, 55, 56, 57) | Where-Object { -not (Test-HotkeyAvailable $_) }).Count -eq 0
+    } 5000
     $hideCountBefore = [XcNative]::SendMessage(
         $window, 0x8042, [UIntPtr]6, [IntPtr]::Zero).ToInt64()
     $visibleBeforeProtectedHide = [XcNative]::IsWindowVisible($window)
@@ -269,17 +270,31 @@ try {
         40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
         [IntPtr]::Zero, [IntPtr]::Zero)
     $externalFocused = Set-TestForeground $externalWindow
-    $mediaHotkeyRestored = Wait-Condition {
-        -not (Test-HotkeyAvailable 53) -and
-        [Runtime.InteropServices.Marshal]::GetLastWin32Error() -eq 1409
+    $allHotkeysRestored = Wait-Condition {
+        @((48, 192, 53, 54, 55, 56, 57) | Where-Object { Test-HotkeyAvailable $_ }).Count -eq 0
     } 5000
-    $seekCountBefore = [XcNative]::SendMessage(
-        $window, 0x8042, [UIntPtr]2, [IntPtr]::Zero).ToInt64()
-    Send-KeyPress 53
-    $externalSeekTriggered = Wait-Condition {
-        [XcNative]::SendMessage(
-            $window, 0x8042, [UIntPtr]2, [IntPtr]::Zero).ToInt64() -gt $seekCountBefore
-    } 5000
+    $tapProbes = @()
+    foreach ($tapCase in @(
+        @(192, 1, 'playPause'), @(53, 2, 'seekBackward'), @(54, 3, 'seekForward'),
+        @(55, 4, 'previous'), @(56, 5, 'next'))) {
+        $tapKey = [byte]$tapCase[0]
+        $tapAction = [int]$tapCase[1]
+        $tapBefore = [XcNative]::SendMessage(
+            $window, 0x8042, [UIntPtr]$tapAction, [IntPtr]::Zero).ToInt64()
+        Send-KeyPress $tapKey
+        $tapTriggered = Wait-Condition {
+            [XcNative]::SendMessage(
+                $window, 0x8042, [UIntPtr]$tapAction, [IntPtr]::Zero).ToInt64() -gt $tapBefore
+        } 1200
+        $tapAfter = [XcNative]::SendMessage(
+            $window, 0x8042, [UIntPtr]$tapAction, [IntPtr]::Zero).ToInt64()
+        $tapProbes += [pscustomobject]@{
+            Name = $tapCase[2]
+            Passed = $tapTriggered -and $tapAfter -eq $tapBefore + 1
+            Counts = "$tapBefore->$tapAfter"
+        }
+    }
+    $externalMediaTapsWork = @($tapProbes | Where-Object { -not $_.Passed }).Count -eq 0
     $holdProbes = @()
     foreach ($holdCase in @(@(53, 2, 'backward'), @(54, 3, 'forward'))) {
         $holdKey = [byte]$holdCase[0]
@@ -308,11 +323,12 @@ try {
     }
     $externalHoldsWork = @($holdProbes | Where-Object { -not $_.Passed }).Count -eq 0
     $results.MediaHotkeysRestoreAfterExternalFocus = $externalInputFocused -and
-        $mediaKeyProtected -and $hideKeyProtected -and $hideBlockedWhileTyping -and
-        $externalFocused -and $mediaHotkeyRestored -and $externalSeekTriggered -and
+        $allHotkeysProtected -and $hideBlockedWhileTyping -and
+        $externalFocused -and $allHotkeysRestored -and $externalMediaTapsWork -and
         $externalHoldsWork
+    $tapProbeText = ($tapProbes | ForEach-Object { "$($_.Name)=$($_.Passed):$($_.Counts)" }) -join ','
     $holdProbeText = ($holdProbes | ForEach-Object { "$($_.Name)=$($_.Passed):$($_.Counts)" }) -join ','
-    $results.MediaHotkeyFocusProbe = "inputFocused=$externalInputFocused mediaProtected=$mediaKeyProtected hideProtected=$hideKeyProtected hideBlocked=$hideBlockedWhileTyping hideCount=$hideCountBefore->$hideCountAfter external=$externalFocused restored=$mediaHotkeyRestored seekTriggered=$externalSeekTriggered holds=[$holdProbeText]"
+    $results.MediaHotkeyFocusProbe = "inputFocused=$externalInputFocused allProtected=$allHotkeysProtected hideBlocked=$hideBlockedWhileTyping hideCount=$hideCountBefore->$hideCountAfter external=$externalFocused allRestored=$allHotkeysRestored taps=[$tapProbeText] holds=[$holdProbeText]"
     if ($externalWindow -ne [IntPtr]::Zero) {
         [void][XcNative]::DestroyWindow($externalWindow)
         $externalWindow = [IntPtr]::Zero
@@ -486,11 +502,14 @@ try {
     [void](Set-TestForeground $externalWindow)
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     $hidden = Wait-Condition { -not [XcNative]::IsWindowVisible($window) }
+    $hiddenInactiveHotkeysReleased = Wait-Condition {
+        @((48, 192, 53, 54, 55, 56) | Where-Object { -not (Test-HotkeyAvailable $_) }).Count -eq 0
+    } 5000
     Start-Sleep -Milliseconds 300
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     $shown = Wait-Condition { [XcNative]::IsWindowVisible($window) }
-    $results.HideShowWithoutClick = $hidden -and $shown
-    $results.HideShowProbe = "hidden=$hidden shown=$shown"
+    $results.HideShowWithoutClick = $hidden -and $hiddenInactiveHotkeysReleased -and $shown
+    $results.HideShowProbe = "hidden=$hidden inactiveReleased=$hiddenInactiveHotkeysReleased shown=$shown"
     if ($externalWindow -ne [IntPtr]::Zero) {
         [void][XcNative]::DestroyWindow($externalWindow)
         $externalWindow = [IntPtr]::Zero

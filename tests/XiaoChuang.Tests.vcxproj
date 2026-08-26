@@ -46,11 +46,13 @@
     <ClCompile Include="CoreTests.cpp" />
     <ClCompile Include="..\src\ConfigStore.cpp" />
     <ClCompile Include="..\src\CoreLogic.cpp" />
+    <ClCompile Include="..\src\MediaBridge.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\AppModel.h" />
     <ClInclude Include="..\src\ConfigStore.h" />
     <ClInclude Include="..\src\CoreLogic.h" />
+    <ClInclude Include="..\src\MediaBridge.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

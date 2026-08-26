@@ -16,6 +16,7 @@ const wchar_t* MediaBridge::BootstrapScript() {
     originalPaused: true,
     lastInteracted: null
   };
+  const frameCommandType = 'MWB_MEDIA_COMMAND_V1';
 
   const isEditable = (node) => {
     if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
@@ -64,14 +65,45 @@ const wchar_t* MediaBridge::BootstrapScript() {
     return videos[0];
   };
 
+  const queryDeep = (selector) => {
+    const roots = [document];
+    const visited = new Set();
+    while (roots.length) {
+      const root = roots.shift();
+      if (!root || visited.has(root)) continue;
+      visited.add(root);
+      try {
+        const match = root.querySelector(selector);
+        if (match) return match;
+        for (const element of root.querySelectorAll('*')) {
+          if (element.shadowRoot) roots.push(element.shadowRoot);
+        }
+      } catch (_) {}
+    }
+    return null;
+  };
+
   const clickFirst = (selectors) => {
     for (const selector of selectors) {
-      const element = document.querySelector(selector);
-      if (element && typeof element.click === 'function' && element.getClientRects().length) {
+      const element = queryDeep(selector);
+      if (!element || typeof element.click !== 'function' ||
+          !element.getClientRects().length || element.disabled ||
+          element.getAttribute('aria-disabled') === 'true') continue;
+      try {
         element.click();
         return true;
-      }
+      } catch (_) {}
     }
+    return false;
+  };
+
+  const callPlayerMethod = (player, method) => {
+    try {
+      if (player && typeof player[method] === 'function') {
+        player[method]();
+        return true;
+      }
+    } catch (_) {}
     return false;
   };
 
@@ -104,18 +136,19 @@ const wchar_t* MediaBridge::BootstrapScript() {
     if (currentSite === 'youtube') {
       const player = document.getElementById('movie_player');
       const api = direction < 0 ? 'previousVideo' : 'nextVideo';
-      if (player && typeof player[api] === 'function') {
-        player[api]();
-        return true;
-      }
+      if (callPlayerMethod(player, api)) return true;
       return clickFirst(direction < 0
         ? ['.ytp-prev-button', 'a.ytp-prev-button']
         : ['.ytp-next-button', 'a.ytp-next-button']);
     }
     if (currentSite === 'bilibili') {
+      const player = window.player || window.bilibiliPlayer;
+      if (callPlayerMethod(player, direction < 0 ? 'prev' : 'next')) return true;
       return clickFirst(direction < 0
-        ? ['.bpx-player-ctrl-prev', '[aria-label="上一个"]', '[title*="上一"]']
-        : ['.bpx-player-ctrl-next', '[aria-label="下一个"]', '[title*="下一"]']);
+        ? ['.bpx-player-ctrl-prev', '[data-title="上一个"]', '[data-title="上一集"]',
+           '[aria-label="上一个"]', '[aria-label="上一集"]', '[title="上一个"]', '[title="上一集"]']
+        : ['.bpx-player-ctrl-next', '[data-title="下一个"]', '[data-title="下一集"]',
+           '[aria-label="下一个"]', '[aria-label="下一集"]', '[title="下一个"]', '[title="下一集"]']);
     }
     if (currentSite === 'douyin') {
       const clicked = clickFirst(direction < 0
@@ -129,7 +162,11 @@ const wchar_t* MediaBridge::BootstrapScript() {
       }));
       return true;
     }
-    return false;
+    return clickFirst(direction < 0
+      ? ['[data-action="previous"]', '[data-action="prev"]', '[aria-label="上一集"]',
+         '[title="上一集"]', 'button[rel="prev"]', 'a[rel="prev"]']
+      : ['[data-action="next"]', '[aria-label="下一集"]', '[title="下一集"]',
+         'button[rel="next"]', 'a[rel="next"]']);
   };
 
   const command = (name, value) => {
@@ -177,6 +214,14 @@ const wchar_t* MediaBridge::BootstrapScript() {
     return false;
   };
 
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (window.parent === window || event.source !== window.parent ||
+        !data || data.type !== frameCommandType || typeof data.name !== 'string') return;
+    if (data.name !== 'stopHold' && !activeVideo()) return;
+    command(data.name, data.value);
+  });
+
   const diagnostic = () => {
     const video = activeVideo();
     if (!video) return { site: site(), adapter: site(), video: null };
@@ -215,8 +260,14 @@ std::wstring MediaBridge::CommandScript(MediaCommand command, int holdRate) {
     case MediaCommand::Previous: name = L"previous"; break;
     case MediaCommand::Next: name = L"next"; break;
     }
-    return L"(() => { if (window.__miniWindowBridge) return window.__miniWindowBridge.command('" +
-        std::wstring(name) + L"', " + std::to_wstring(holdRate) + L"); return false; })();";
+    const std::wstring commandName(name);
+    const std::wstring rate = std::to_wstring(holdRate);
+    return L"(() => { const name='" + commandName + L"'; const value=" + rate +
+        L"; if (window.__miniWindowBridge && window.__miniWindowBridge.command(name,value)) return true; "
+        L"let posted=false; for (let i=0;i<window.frames.length;++i) { const frame=window.frames[i]; "
+        L"try { if (frame.__miniWindowBridge && frame.__miniWindowBridge.command(name,value)) return true; } catch (_) {} "
+        L"try { frame.postMessage({type:'MWB_MEDIA_COMMAND_V1',name,value},'*'); posted=true; } catch (_) {} } "
+        L"return posted; })();";
 }
 
 std::wstring MediaBridge::DiagnosticScript() {

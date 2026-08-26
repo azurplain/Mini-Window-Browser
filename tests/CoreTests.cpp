@@ -1,6 +1,7 @@
 #include "../src/AppModel.h"
 #include "../src/ConfigStore.h"
 #include "../src/CoreLogic.h"
+#include "../src/MediaBridge.h"
 
 #include <windows.h>
 
@@ -66,6 +67,24 @@ void TestConfigMigration() {
     Check(dragSettingReloaded.settings.autoFitVideoFullscreen &&
           dragSettingReloaded.settings.lockVideoFullscreenAspect,
           L"网页全屏自动适配与比例锁定配置往返一致");
+
+    const std::array<UINT, xiaochuang::kHotkeyCount> auditKeys = {
+        L'1', VK_OEM_3, L'3', L'4', VK_XBUTTON1, VK_XBUTTON2, L'9'};
+    for (size_t index = 0; index < xiaochuang::kHotkeyCount; ++index) {
+        reloaded.hotkeys[index].virtualKey = auditKeys[index];
+        reloaded.hotkeys[index].modifiers = index % 2 == 0 ? MOD_CONTROL : 0;
+    }
+    Check(store.Save(reloaded, rect, false), L"全部快捷键绑定可保存");
+    xiaochuang::AppState hotkeyReloaded;
+    Check(store.Load(hotkeyReloaded), L"全部快捷键绑定可重新加载");
+    bool allHotkeysRoundTrip = true;
+    for (size_t index = 0; index < xiaochuang::kHotkeyCount; ++index) {
+        allHotkeysRoundTrip = allHotkeysRoundTrip &&
+            hotkeyReloaded.hotkeys[index].virtualKey == auditKeys[index] &&
+            hotkeyReloaded.hotkeys[index].modifiers ==
+                (index % 2 == 0 ? static_cast<UINT>(MOD_CONTROL) : 0U);
+    }
+    Check(allHotkeysRoundTrip, L"键盘与鼠标侧键绑定完整往返且动作顺序不串位");
 
     xiaochuang::Preset preset;
     preset.name = L"三标签";
@@ -184,6 +203,37 @@ void TestRawMouseButtons() {
     Check(DecodeRawMouseButtons(0).empty(), L"Raw Input 忽略无关鼠标移动");
 }
 
+void TestMediaBridgeCommands() {
+    using namespace xiaochuang;
+    const std::wstring bootstrap = MediaBridge::BootstrapScript();
+    Check(bootstrap.find(L"window.player || window.bilibiliPlayer") != std::wstring::npos,
+          L"Bilibili 上一集下一集优先使用播放器接口");
+    Check(bootstrap.find(L"element.shadowRoot") != std::wstring::npos,
+          L"媒体按钮适配支持开放 Shadow DOM");
+    Check(bootstrap.find(L"[data-action=\"previous\"]") != std::wstring::npos &&
+          bootstrap.find(L"[data-action=\"next\"]") != std::wstring::npos,
+          L"未知站点使用保守的上一集下一集回退");
+    Check(bootstrap.find(L"MWB_MEDIA_COMMAND_V1") != std::wstring::npos &&
+          bootstrap.find(L"event.source !== window.parent") != std::wstring::npos,
+          L"子框架媒体命令仅接受直接父框架广播");
+
+    Check(MediaBridge::CommandScript(MediaCommand::TogglePlay).find(L"'togglePlay'") != std::wstring::npos,
+          L"播放暂停命令映射正确");
+    Check(MediaBridge::CommandScript(MediaCommand::SeekBackward).find(L"'seekBackward'") != std::wstring::npos,
+          L"快退命令映射正确");
+    Check(MediaBridge::CommandScript(MediaCommand::SeekForward).find(L"'seekForward'") != std::wstring::npos,
+          L"快进命令映射正确");
+    Check(MediaBridge::CommandScript(MediaCommand::Previous).find(L"'previous'") != std::wstring::npos,
+          L"上一集命令映射正确");
+    Check(MediaBridge::CommandScript(MediaCommand::Next).find(L"'next'") != std::wstring::npos,
+          L"下一集命令映射正确");
+    Check(MediaBridge::CommandScript(MediaCommand::Next).find(L"window.frames.length") != std::wstring::npos &&
+          MediaBridge::CommandScript(MediaCommand::Next).find(L"frame.postMessage") != std::wstring::npos,
+          L"顶层页面找不到媒体时向子框架转发命令");
+    Check(MediaBridge::CommandScript(MediaCommand::HoldBackward, 99).find(L"const value=5;") != std::wstring::npos,
+          L"长按倍速在媒体命令层限制为 2 到 5 倍");
+}
+
 void TestPresetNames() {
     using namespace xiaochuang;
     const std::vector<std::wstring> names = {L"原神", L"BILIBILI"};
@@ -237,6 +287,7 @@ int wmain() {
     TestHoldGestures();
     TestInputAndMediaSelection();
     TestRawMouseButtons();
+    TestMediaBridgeCommands();
     TestPresetNames();
     TestWindowGeometryHelpers();
     if (failures == 0) {

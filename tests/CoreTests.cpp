@@ -207,7 +207,14 @@ void TestMediaBridgeCommands() {
     using namespace xiaochuang;
     const std::wstring bootstrap = MediaBridge::BootstrapScript();
     Check(bootstrap.find(L"window.player || window.bilibiliPlayer") != std::wstring::npos,
-          L"Bilibili 上一集下一集优先使用播放器接口");
+          L"Bilibili 普通视频上一集下一集使用播放器接口");
+    const size_t bangumiFallback = bootstrap.find(
+        L"if (isBangumi && clickFirst(selectors)) return true;");
+    const size_t bilibiliPlayerCall = bootstrap.find(
+        L"if (callPlayerMethod(player, direction < 0 ? 'prev' : 'next')) return true;");
+    Check(bangumiFallback != std::wstring::npos && bilibiliPlayerCall != std::wstring::npos &&
+          bangumiFallback < bilibiliPlayerCall,
+          L"Bilibili 番剧先点击有效的前后集按钮再尝试空操作播放器接口");
     Check(bootstrap.find(L"element.shadowRoot") != std::wstring::npos,
           L"媒体按钮适配支持开放 Shadow DOM");
     Check(bootstrap.find(L"[data-action=\"previous\"]") != std::wstring::npos &&

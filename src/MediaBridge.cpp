@@ -142,13 +142,19 @@ const wchar_t* MediaBridge::BootstrapScript() {
         : ['.ytp-next-button', 'a.ytp-next-button']);
     }
     if (currentSite === 'bilibili') {
-      const player = window.player || window.bilibiliPlayer;
-      if (callPlayerMethod(player, direction < 0 ? 'prev' : 'next')) return true;
-      return clickFirst(direction < 0
+      const selectors = direction < 0
         ? ['.bpx-player-ctrl-prev', '[data-title="上一个"]', '[data-title="上一集"]',
            '[aria-label="上一个"]', '[aria-label="上一集"]', '[title="上一个"]', '[title="上一集"]']
         : ['.bpx-player-ctrl-next', '[data-title="下一个"]', '[data-title="下一集"]',
-           '[aria-label="下一个"]', '[aria-label="下一集"]', '[title="下一个"]', '[title="下一集"]']);
+           '[aria-label="下一个"]', '[aria-label="下一集"]', '[title="下一个"]', '[title="下一集"]'];
+      // Bangumi pages expose player.prev/next functions that currently do
+      // nothing. Their real episode navigation is wired to the control-bar
+      // buttons, so use those first instead of treating the no-op API as success.
+      const isBangumi = location.pathname.startsWith('/bangumi/play/');
+      if (isBangumi && clickFirst(selectors)) return true;
+      const player = window.player || window.bilibiliPlayer;
+      if (callPlayerMethod(player, direction < 0 ? 'prev' : 'next')) return true;
+      return clickFirst(selectors);
     }
     if (currentSite === 'douyin') {
       const clicked = clickFirst(direction < 0

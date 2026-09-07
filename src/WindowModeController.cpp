@@ -94,6 +94,7 @@ void WindowModeController::SetHidden(bool hidden) {
     if (!window_ || hidden_ == hidden) return;
     hidden_ = hidden;
     if (hidden_) {
+        KillTimer(window_, kImmersionTimerId);
         ShowWindow(window_, SW_HIDE);
     } else {
         ShowWindow(window_, IsIconic(window_) ? SW_RESTORE : SW_SHOWNOACTIVATE);
@@ -206,20 +207,35 @@ void WindowModeController::UpdateNormalRectFromWindow() {
 }
 
 void WindowModeController::OnImmersionTimer() {
-    if (!window_ || !settings_ || !IsImmersive()) return;
+    if (!window_ || !settings_ || !IsImmersive() || hidden_) return;
     POINT cursor{};
-    GetCursorPos(&cursor);
+    if (!GetCursorPos(&cursor)) return;
     if (visibleMode_ == WindowMode::ImmersionHole) {
+        constexpr int kCursorQuantum = 4;
+        cursor.x = (cursor.x / kCursorQuantum) * kCursorQuantum;
+        cursor.y = (cursor.y / kCursorQuantum) * kCursorQuantum;
         if (cursor.x == lastCursor_.x && cursor.y == lastCursor_.y) return;
         lastCursor_ = cursor;
         POINT client = cursor;
         ScreenToClient(window_, &client);
         RECT bounds{};
         GetClientRect(window_, &bounds);
+        const int radius = std::max(0, settings_->holeRadius);
+        const bool outside = radius == 0 || client.x + radius <= bounds.left ||
+            client.x - radius >= bounds.right || client.y + radius <= bounds.top ||
+            client.y - radius >= bounds.bottom;
+        if (outside) {
+            if (holeOutsideWindow_) return;
+            holeOutsideWindow_ = true;
+            SetWindowRgn(window_, nullptr, FALSE);
+            RedrawWindow(window_, nullptr, nullptr,
+                         RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+            return;
+        }
+        holeOutsideWindow_ = false;
         HRGN full = CreateRectRgn(0, 0, bounds.right, bounds.bottom);
         HRGN result = nullptr;
-        if (settings_->holeRadius > 0) {
-            const int radius = settings_->holeRadius;
+        if (radius > 0) {
             HRGN hole = CreateEllipticRgn(client.x - radius, client.y - radius,
                                           client.x + radius, client.y + radius);
             if (full && hole) {
@@ -231,7 +247,12 @@ void WindowModeController::OnImmersionTimer() {
         if (!result) result = full;
         else if (full) DeleteObject(full);
         if (!result) return;
-        if (!SetWindowRgn(window_, result, FALSE)) DeleteObject(result);
+        if (!SetWindowRgn(window_, result, FALSE)) {
+            DeleteObject(result);
+        } else {
+            RedrawWindow(window_, nullptr, nullptr,
+                         RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+        }
         return;
     }
 
@@ -298,6 +319,7 @@ void WindowModeController::RefreshVisualState() {
     }
     if (visibleMode_ == WindowMode::ImmersionHole) {
         lastCursor_ = {LONG_MIN, LONG_MIN};
+        holeOutsideWindow_ = false;
         SetLayeredWindowAttributes(window_, 0, ConfiguredAlpha(), LWA_ALPHA);
         OnImmersionTimer();
     } else {
@@ -332,13 +354,14 @@ void WindowModeController::ApplyVisibleMode(WindowMode mode, bool restoreGeometr
     ApplyStyle(style, exStyle);
     RefreshFrameAppearance();
 
-    UINT positionFlags = SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW | SWP_NOREDRAW;
+    UINT positionFlags = SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW;
     if (immersive) {
         if (restoreGeometry) {
-            const RECT rect = preImmersionRect_;
-            const int height = std::max(1, static_cast<int>(rect.bottom - rect.top) - chromeHeight_);
-            SetWindowPos(window_, HWND_TOPMOST, rect.left, rect.top + chromeHeight_,
-                         rect.right - rect.left, height,
+            const RECT rect = CalculateImmersionRect(
+                preImmersionRect_, CurrentMonitorRect(false), chromeHeight_,
+                settings_->snapThreshold);
+            SetWindowPos(window_, HWND_TOPMOST, rect.left, rect.top,
+                         rect.right - rect.left, rect.bottom - rect.top,
                          positionFlags);
         } else {
             SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0,
@@ -375,9 +398,9 @@ void WindowModeController::ApplyVisibleMode(WindowMode mode, bool restoreGeometr
         ClearRegionAndOpacity();
     }
     if (layoutCallback_) layoutCallback_();
-    if (immersive) {
+    if (immersive && !hidden_) {
         OnImmersionTimer();
-        SetTimer(window_, kImmersionTimerId, 33, nullptr);
+        SetTimer(window_, kImmersionTimerId, 50, nullptr);
     }
     RedrawWindow(window_, nullptr, nullptr,
                  RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -408,7 +431,7 @@ BYTE WindowModeController::ConfiguredAlpha() const {
 
 void WindowModeController::ClearRegionAndOpacity() const {
     if (!window_) return;
-    SetWindowRgn(window_, nullptr, FALSE);
+    SetWindowRgn(window_, nullptr, TRUE);
     SetLayeredWindowAttributes(window_, 0, 255, LWA_ALPHA);
 }
 
@@ -417,9 +440,9 @@ RECT WindowModeController::EnsureVisible(RECT rect, bool useWorkArea) const {
     MONITORINFO info{sizeof(info)};
     if (!GetMonitorInfoW(monitor, &info)) return rect;
     const RECT work = useWorkArea ? info.rcWork : info.rcMonitor;
-    int width = std::clamp(static_cast<int>(rect.right - rect.left), 360,
+    int width = std::clamp(static_cast<int>(rect.right - rect.left), 160,
                            static_cast<int>(work.right - work.left));
-    int height = std::clamp(static_cast<int>(rect.bottom - rect.top), 240,
+    int height = std::clamp(static_cast<int>(rect.bottom - rect.top), 120,
                             static_cast<int>(work.bottom - work.top));
     const int left = std::clamp(static_cast<int>(rect.left), static_cast<int>(work.left),
                                 static_cast<int>(work.right) - width);

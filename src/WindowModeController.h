@@ -71,6 +71,7 @@ private:
     bool videoFitActive_ = false;
     double webFullscreenAspect_ = 0.0;
     POINT lastCursor_{LONG_MIN, LONG_MIN};
+    bool holeOutsideWindow_ = false;
     bool hoverCandidate_ = false;
     bool hoverApplied_ = false;
     ULONGLONG hoverCandidateSince_ = 0;

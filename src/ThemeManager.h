@@ -61,6 +61,7 @@ private:
     HBRUSH surfaceBrush_ = nullptr;
     HBRUSH chromeBrush_ = nullptr;
     Microsoft::WRL::ComPtr<ID2D1Factory> d2dFactory_;
+    mutable Microsoft::WRL::ComPtr<ID2D1DCRenderTarget> dcRenderTarget_;
     Microsoft::WRL::ComPtr<IDWriteFactory> writeFactory_;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> textFormat_;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> smallTextFormat_;

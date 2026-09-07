@@ -55,6 +55,7 @@ struct HotkeyBinding {
     UINT modifiers = 0;
     UINT virtualKey = 0;
     std::wstring displayName;
+    bool enabled = true;
 };
 
 inline std::array<HotkeyBinding, kHotkeyCount> DefaultHotkeys() {
@@ -122,6 +123,9 @@ struct Preset {
     bool disableHotkeysOnTyping = true;
     bool useSystemTray = false;
     bool backgroundMediaHotkeys = false;
+    bool autoFitVideoFullscreen = false;
+    bool lockVideoFullscreenAspect = false;
+    bool maximizedTopDragEnabled = false;
     ImmersionStyle immersionStyle = ImmersionStyle::Hole;
     std::wstring homeUrl = L"https://www.bilibili.com";
     std::wstring currentUrl = L"https://www.bilibili.com";

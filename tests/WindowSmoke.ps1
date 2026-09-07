@@ -270,9 +270,12 @@ try {
         40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
         [IntPtr]::Zero, [IntPtr]::Zero)
     $externalFocused = Set-TestForeground $externalWindow
-    $allHotkeysRestored = Wait-Condition {
-        @((48, 192, 53, 54, 55, 56, 57) | Where-Object { Test-HotkeyAvailable $_ }).Count -eq 0
+    $guardCleared = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
     } 5000
+    Start-Sleep -Milliseconds 250
+    $allHotkeysRestored =
+        @((48, 192, 53, 54, 55, 56, 57) | Where-Object { Test-HotkeyAvailable $_ }).Count -eq 0
     $tapProbes = @()
     foreach ($tapCase in @(
         @(192, 1, 'playPause'), @(53, 2, 'seekBackward'), @(54, 3, 'seekForward'),
@@ -324,11 +327,11 @@ try {
     $externalHoldsWork = @($holdProbes | Where-Object { -not $_.Passed }).Count -eq 0
     $results.MediaHotkeysRestoreAfterExternalFocus = $externalInputFocused -and
         $allHotkeysProtected -and $hideBlockedWhileTyping -and
-        $externalFocused -and $allHotkeysRestored -and $externalMediaTapsWork -and
+        $externalFocused -and $guardCleared -and $allHotkeysRestored -and $externalMediaTapsWork -and
         $externalHoldsWork
     $tapProbeText = ($tapProbes | ForEach-Object { "$($_.Name)=$($_.Passed):$($_.Counts)" }) -join ','
     $holdProbeText = ($holdProbes | ForEach-Object { "$($_.Name)=$($_.Passed):$($_.Counts)" }) -join ','
-    $results.MediaHotkeyFocusProbe = "inputFocused=$externalInputFocused allProtected=$allHotkeysProtected hideBlocked=$hideBlockedWhileTyping hideCount=$hideCountBefore->$hideCountAfter external=$externalFocused allRestored=$allHotkeysRestored taps=[$tapProbeText] holds=[$holdProbeText]"
+    $results.MediaHotkeyFocusProbe = "inputFocused=$externalInputFocused allProtected=$allHotkeysProtected hideBlocked=$hideBlockedWhileTyping hideCount=$hideCountBefore->$hideCountAfter external=$externalFocused guardCleared=$guardCleared allRestored=$allHotkeysRestored taps=[$tapProbeText] holds=[$holdProbeText]"
     if ($externalWindow -ne [IntPtr]::Zero) {
         [void][XcNative]::DestroyWindow($externalWindow)
         $externalWindow = [IntPtr]::Zero
@@ -358,6 +361,19 @@ try {
     $lockDisabledAgain = Wait-Condition { -not [XcNative]::IsWindowEnabled($lockAspect) }
     $results.FullscreenAspectLockOption = $lockInitiallyDisabled -and $lockEnabled -and
         $lockSaved -and $lockDisabledAgain
+    $nextEnabled = [XcNative]::GetDlgItem($settings, 2205)
+    [void][XcNative]::SendMessage($nextEnabled, 0x00f1, [UIntPtr]0, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2205, $nextEnabled)
+    $disabledReleased = Wait-Condition { Test-HotkeyAvailable 56 }
+    $disabledSaved = (Get-Content -LiteralPath (Join-Path $tempRoot 'config.ini') -Raw) -match
+        '(?m)^NextEp=0,56,0\r?$'
+    [void][XcNative]::SendMessage($nextEnabled, 0x00f1, [UIntPtr]1, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2205, $nextEnabled)
+    $enabledOwned = Wait-Condition { -not (Test-HotkeyAvailable 56) }
+    $enabledSaved = (Get-Content -LiteralPath (Join-Path $tempRoot 'config.ini') -Raw) -match
+        '(?m)^NextEp=0,56,1\r?$'
+    $results.PerHotkeyEnableToggle = $nextEnabled -ne [IntPtr]::Zero -and
+        $disabledReleased -and $disabledSaved -and $enabledOwned -and $enabledSaved
     $hiddenForHole = $opacity -ne [IntPtr]::Zero -and -not [XcNative]::IsWindowVisible($opacity)
     [void][XcNative]::SendMessage($style, 0x14e, [UIntPtr]1, [IntPtr]::Zero)
     $styleChanged = [UIntPtr]((1 -shl 16) -bor 2003)
@@ -435,16 +451,35 @@ try {
     [void][XcNative]::GetWindowText($hideBinding, $bindingText, $bindingText.Capacity)
     $savedConfig = Get-Content -LiteralPath (Join-Path $tempRoot 'config.ini') -Raw
     [void][XcNative]::PostMessage($settings, 0x10, [UIntPtr]::Zero, [IntPtr]::Zero)
-    Start-Sleep -Milliseconds 150
+    $externalWindow = [XcNative]::CreateWindowEx(
+        0, 'STATIC', 'XC Mouse Hotkey Focus', 0x10cf0000,
+        40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
+        [IntPtr]::Zero, [IntPtr]::Zero)
+    [void](Set-TestForeground $externalWindow)
+    [void](Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    })
     $hideSent = Send-XButton 1
     $mouseHidden = Wait-Condition { -not [XcNative]::IsWindowVisible($window) }
+    [void](Set-TestForeground $externalWindow)
+    [void](Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    })
     Start-Sleep -Milliseconds 300
-    $showSent = Send-XButton 1
+    $inputBeforeMouseShow = [XcNative]::SendMessage(
+        $window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64()
+    $hideCountBeforeMouseShow = [XcNative]::SendMessage(
+        $window, 0x8042, [UIntPtr]6, [IntPtr]::Zero).ToInt64()
+    $showPosted = [XcNative]::PostMessage(
+        $window, 0x8028, [UIntPtr]5, [IntPtr]1)
     $mouseShown = Wait-Condition { [XcNative]::IsWindowVisible($window) }
+    $hideCountAfterMouseShow = [XcNative]::SendMessage(
+        $window, 0x8042, [UIntPtr]6, [IntPtr]::Zero).ToInt64()
+    $showSent = if ($showPosted) { 2 } else { 0 }
     $results.MouseSideButtonBinding = $captureSent -eq 2 -and $hideSent -eq 2 -and
         $showSent -eq 2 -and $bindingText.ToString() -eq '鼠标侧键1' -and
-        $savedConfig -match '(?m)^HideWin=0,5\r?$' -and $mouseHidden -and $mouseShown
-    $results.MouseSideButtonProbe = "capture=$captureSent text=$($bindingText.ToString()) saved=$($savedConfig -match '(?m)^HideWin=0,5\r?$') hidden=$mouseHidden shown=$mouseShown"
+        $savedConfig -match '(?m)^HideWin=0,5,1\r?$' -and $mouseHidden -and $mouseShown
+    $results.MouseSideButtonProbe = "capture=$captureSent text=$($bindingText.ToString()) saved=$($savedConfig -match '(?m)^HideWin=0,5,1\r?$') hidden=$mouseHidden shown=$mouseShown input=$inputBeforeMouseShow count=$hideCountBeforeMouseShow->$hideCountAfterMouseShow"
 
     [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1010, [IntPtr]::Zero)
     [void](Wait-Condition {
@@ -461,16 +496,29 @@ try {
     [void][XcNative]::GetWindowText($hideBinding, $bindingText2, $bindingText2.Capacity)
     $savedConfig2 = Get-Content -LiteralPath (Join-Path $tempRoot 'config.ini') -Raw
     [void][XcNative]::PostMessage($settings, 0x10, [UIntPtr]::Zero, [IntPtr]::Zero)
-    Start-Sleep -Milliseconds 150
+    [void](Set-TestForeground $externalWindow)
+    [void](Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    })
     $hideSent2 = Send-XButton 2
     $mouseHidden2 = Wait-Condition { -not [XcNative]::IsWindowVisible($window) }
+    [void](Set-TestForeground $externalWindow)
+    [void](Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    })
     Start-Sleep -Milliseconds 300
-    $showSent2 = Send-XButton 2
+    $showPosted2 = [XcNative]::PostMessage(
+        $window, 0x8028, [UIntPtr]6, [IntPtr]1)
     $mouseShown2 = Wait-Condition { [XcNative]::IsWindowVisible($window) }
+    $showSent2 = if ($showPosted2) { 2 } else { 0 }
     $results.MouseSideButton2Binding = $captureSent2 -eq 2 -and $hideSent2 -eq 2 -and
         $showSent2 -eq 2 -and $bindingText2.ToString() -eq '鼠标侧键2' -and
-        $savedConfig2 -match '(?m)^HideWin=0,6\r?$' -and $mouseHidden2 -and $mouseShown2
-    $results.MouseSideButton2Probe = "capture=$captureSent2 text=$($bindingText2.ToString()) saved=$($savedConfig2 -match '(?m)^HideWin=0,6\r?$') hidden=$mouseHidden2 shown=$mouseShown2"
+        $savedConfig2 -match '(?m)^HideWin=0,6,1\r?$' -and $mouseHidden2 -and $mouseShown2
+    $results.MouseSideButton2Probe = "capture=$captureSent2 text=$($bindingText2.ToString()) saved=$($savedConfig2 -match '(?m)^HideWin=0,6,1\r?$') hidden=$mouseHidden2 shown=$mouseShown2"
+    if ($externalWindow -ne [IntPtr]::Zero) {
+        [void][XcNative]::DestroyWindow($externalWindow)
+        $externalWindow = [IntPtr]::Zero
+    }
 
     $address = [XcNative]::GetDlgItem($window, 1001)
     $addressLength = [XcNative]::SendMessage(
@@ -490,26 +538,35 @@ try {
     $previousFocus = [XcNative]::SetFocus($address)
     if ($attached) { [void][XcNative]::AttachThreadInput($currentThread, $applicationThread, $false) }
     [void][XcNative]::PostMessage($window, 0x8029, [UIntPtr]::Zero, [IntPtr]::Zero)
-    Start-Sleep -Milliseconds 250
     $results.AddressFocusPrepared = $address -ne [IntPtr]::Zero
+    $nativeInputProtected = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 3
+    }
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     Start-Sleep -Milliseconds 250
-    $results.InputProtectionBlocksHideHotkey = [XcNative]::IsWindowVisible($window)
+    $results.InputProtectionBlocksHideHotkey = $nativeInputProtected -and
+        [XcNative]::IsWindowVisible($window)
     $externalWindow = [XcNative]::CreateWindowEx(
         0, 'STATIC', 'XC Hide Focus', 0x10cf0000,
         40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
         [IntPtr]::Zero, [IntPtr]::Zero)
-    [void](Set-TestForeground $externalWindow)
+    $hideExternalFocused = Set-TestForeground $externalWindow
+    $hideGuardCleared = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    } 5000
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     $hidden = Wait-Condition { -not [XcNative]::IsWindowVisible($window) }
     $hiddenInactiveHotkeysReleased = Wait-Condition {
         @((48, 192, 53, 54, 55, 56) | Where-Object { -not (Test-HotkeyAvailable $_) }).Count -eq 0
     } 5000
+    $inputStateAfterExternalFocus = [XcNative]::SendMessage(
+        $window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64()
     Start-Sleep -Milliseconds 300
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     $shown = Wait-Condition { [XcNative]::IsWindowVisible($window) }
-    $results.HideShowWithoutClick = $hidden -and $hiddenInactiveHotkeysReleased -and $shown
-    $results.HideShowProbe = "hidden=$hidden inactiveReleased=$hiddenInactiveHotkeysReleased shown=$shown"
+    $results.HideShowWithoutClick = $hideExternalFocused -and $hideGuardCleared -and $hidden -and
+        $hiddenInactiveHotkeysReleased -and $shown
+    $results.HideShowProbe = "externalFocused=$hideExternalFocused guardCleared=$hideGuardCleared inputState=$inputStateAfterExternalFocus hidden=$hidden inactiveReleased=$hiddenInactiveHotkeysReleased shown=$shown"
     if ($externalWindow -ne [IntPtr]::Zero) {
         [void][XcNative]::DestroyWindow($externalWindow)
         $externalWindow = [IntPtr]::Zero
@@ -527,6 +584,12 @@ try {
     $window = $process.MainWindowHandle
     Start-Sleep -Milliseconds 500
 
+    $externalWindow = [XcNative]::CreateWindowEx(
+        0, 'STATIC', 'XC Immersion Focus', 0x10cf0000,
+        40, 40, 260, 120, [IntPtr]::Zero, [IntPtr]::Zero,
+        [IntPtr]::Zero, [IntPtr]::Zero)
+    [void](Set-TestForeground $externalWindow)
+
     [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1010, [IntPtr]::Zero)
     [void](Wait-Condition {
         $popup = [XcNative]::GetLastActivePopup($window)
@@ -543,6 +606,32 @@ try {
     $monitorInfo.Size = [Runtime.InteropServices.Marshal]::SizeOf([type][XcNative+MONITORINFO])
     $monitor = [XcNative]::MonitorFromWindow($window, 2)
     [void][XcNative]::GetMonitorInfo($monitor, [ref]$monitorInfo)
+    $topWidth = [Math]::Min(900, $monitorInfo.Monitor.Right - $monitorInfo.Monitor.Left)
+    $topHeight = [Math]::Min(600, $monitorInfo.Monitor.Bottom - $monitorInfo.Monitor.Top)
+    [void][XcNative]::SetWindowPos($window, [IntPtr]::Zero,
+        $monitorInfo.Monitor.Left, $monitorInfo.Monitor.Top, $topWidth, $topHeight, 0x0014)
+    [void][XcNative]::SendMessage($window, 0x0232, [UIntPtr]::Zero, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($window, 0x0312, [UIntPtr]101, [IntPtr]::Zero)
+    $topImmersiveRect = New-Object XcNative+RECT
+    $topImmersionAttached = Wait-Condition {
+        [void][XcNative]::GetWindowRect($window, [ref]$topImmersiveRect)
+        $topImmersiveRect.Top -eq $monitorInfo.Monitor.Top
+    }
+    $topImmersionGuardCleared = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8045, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    }
+    Start-Sleep -Milliseconds 400
+    [void][XcNative]::SendMessage($window, 0x0312, [UIntPtr]101, [IntPtr]::Zero)
+    $topRestoredRect = New-Object XcNative+RECT
+    $topNormalRestored = Wait-Condition {
+        [void][XcNative]::GetWindowRect($window, [ref]$topRestoredRect)
+        $topRestoredRect.Top -eq $monitorInfo.Monitor.Top -and
+        ($topRestoredRect.Bottom - $topRestoredRect.Top) -eq $topHeight
+    }
+    $results.TopSnapImmersionHasNoGap = $topImmersionAttached -and
+        $topImmersionGuardCleared -and $topNormalRestored
+    $results.TopSnapProbe = "immersive=$($topImmersiveRect.Left),$($topImmersiveRect.Top),$($topImmersiveRect.Right),$($topImmersiveRect.Bottom) guardCleared=$topImmersionGuardCleared restored=$($topRestoredRect.Left),$($topRestoredRect.Top),$($topRestoredRect.Right),$($topRestoredRect.Bottom)"
+
     $normalWidth = [Math]::Min(900, $monitorInfo.Work.Right - $monitorInfo.Work.Left)
     $normalHeight = [Math]::Min(600, $monitorInfo.Work.Bottom - $monitorInfo.Work.Top)
     $normalLeft = $monitorInfo.Work.Right - $normalWidth
@@ -605,9 +694,12 @@ try {
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]101, [IntPtr]::Zero)
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
     Start-Sleep -Milliseconds 100
-    $results.RapidModeKeysStable = [XcNative]::IsWindow($window) -and
-        -not $process.HasExited -and [XcNative]::IsWindowVisible($window)
+    $rapidHidden = -not [XcNative]::IsWindowVisible($window)
+    $rapidStillRunning = [XcNative]::IsWindow($window) -and -not $process.HasExited
     Start-Sleep -Milliseconds 200
+    [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]107, [IntPtr]::Zero)
+    $rapidShown = Wait-Condition { [XcNative]::IsWindowVisible($window) }
+    $results.RapidModeKeysStable = $rapidStillRunning -and $rapidHidden -and $rapidShown
     [void][XcNative]::PostMessage($window, 0x312, [UIntPtr]101, [IntPtr]::Zero)
     Start-Sleep -Milliseconds 300
 

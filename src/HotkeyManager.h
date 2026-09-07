@@ -40,10 +40,14 @@ public:
     bool HandleKeyboardMessage(WPARAM virtualKey, LPARAM packedState);
     void Tick();
     void CancelActiveGesture();
+    void SetImmersiveWebFullscreen(bool active) noexcept {
+        suppressEscapeForFocusedWebView_ = active;
+    }
 
     void BeginMouseCapture(CaptureCallback callback);
     void CancelMouseCapture();
     bool IsCapturing() const noexcept { return static_cast<bool>(captureCallback_); }
+    bool IsInputSuppressed() const noexcept { return inputSuppressed_; }
 
     const std::vector<std::wstring>& RegistrationErrors() const noexcept { return registrationErrors_; }
 
@@ -96,7 +100,8 @@ private:
     bool inputSuppressed_ = false;
     std::array<bool, 3> mouseDown_{};
     std::array<bool, 256> keyboardDown_{};
-    ULONGLONG lastWindowActionAt_ = 0;
+    std::array<ULONGLONG, 2> lastWindowActionAt_{};
+    std::atomic_bool suppressEscapeForFocusedWebView_{false};
 };
 
 } // namespace xiaochuang

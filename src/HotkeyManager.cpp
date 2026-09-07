@@ -30,7 +30,7 @@ bool HotkeyManager::Start(HWND window, std::array<HotkeyBinding, kHotkeyCount>* 
     if (rawInputReadyEvent_) {
         rawInputThread_ = CreateThread(nullptr, 0, RawInputThreadProc, this, 0, &rawInputThreadId_);
         if (rawInputThread_) {
-            WaitForSingleObject(rawInputReadyEvent_, 5000);
+            WaitForSingleObject(rawInputReadyEvent_, 500);
         }
     }
     Refresh(false, false, false);
@@ -69,7 +69,8 @@ void HotkeyManager::Stop() {
     window_ = nullptr;
     mouseDown_.fill(false);
     keyboardDown_.fill(false);
-    lastWindowActionAt_ = 0;
+    lastWindowActionAt_.fill(0);
+    suppressEscapeForFocusedWebView_.store(false);
 }
 
 void HotkeyManager::Refresh(bool hidden, bool backgroundMediaHotkeys, bool inputSuppressed) {
@@ -92,7 +93,7 @@ void HotkeyManager::Refresh(bool hidden, bool backgroundMediaHotkeys, bool input
         const HotkeyAction action = static_cast<HotkeyAction>(index);
         const HotkeyBinding& binding = (*bindings_)[index];
         if (inputSuppressed_) continue;
-        if (!IsActionActive(action) || IsMouseKey(binding.virtualKey)) continue;
+        if (!binding.enabled || !IsActionActive(action) || IsMouseKey(binding.virtualKey)) continue;
         if (!RegisterHotKey(window_, binding.id, binding.modifiers | MOD_NOREPEAT, binding.virtualKey)) {
             registrationErrors_.push_back(binding.displayName + L"（" + HotkeyDisplayText(binding) + L"）");
         }
@@ -104,6 +105,7 @@ bool HotkeyManager::HandleHotkeyMessage(int identifier) {
     const auto action = FindById(identifier);
     if (!action || !IsActionActive(*action)) return false;
     const HotkeyBinding& binding = (*bindings_)[HotkeyIndex(*action)];
+    if (!binding.enabled) return false;
     if (*action == HotkeyAction::SeekBackward || *action == HotkeyAction::SeekForward) {
         // When focus is outside the browser, the low-level hook owns both the
         // key-down and key-up messages. Ignore a duplicate WM_HOTKEY so it
@@ -128,7 +130,10 @@ bool HotkeyManager::HandleMouseMessage(WPARAM virtualKeyValue, LPARAM packedStat
     const auto stateIndex = MouseStateIndex(virtualKey);
     if (!stateIndex) return false;
     if (down) {
-        if (mouseDown_[*stateIndex]) return false;
+        if (mouseDown_[*stateIndex]) {
+            if ((GetAsyncKeyState(static_cast<int>(virtualKey)) & 0x8000) != 0) return false;
+            mouseDown_[*stateIndex] = false;
+        }
         mouseDown_[*stateIndex] = true;
     } else {
         if (!mouseDown_[*stateIndex]) return false;
@@ -205,6 +210,12 @@ void HotkeyManager::Tick() {
         ReleaseGesture();
         return;
     }
+    if (pending_->releaseByMessage && ShouldForceReleaseMessageGesture(
+            GetTickCount64() - pending_->startedAt,
+            (GetAsyncKeyState(static_cast<int>(pending_->virtualKey)) & 0x8000) != 0)) {
+        ReleaseGesture();
+        return;
+    }
     if (!pending_->holding && GetTickCount64() - pending_->startedAt >= 400) {
         pending_->holding = true;
         if (callback_) callback_(pending_->action, HotkeyGesture::HoldStart);
@@ -243,12 +254,16 @@ LRESULT CALLBACK HotkeyManager::KeyboardHookProc(int code, WPARAM message, LPARA
     if (const HWND foreground = GetForegroundWindow()) {
         GetWindowThreadProcessId(foreground, &foregroundProcess);
     }
+    const auto* keyboard = reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
+    const UINT virtualKey = keyboard->vkCode;
+    if (virtualKey == VK_ESCAPE && instance_->suppressEscapeForFocusedWebView_.load() &&
+        foregroundProcess == GetCurrentProcessId() && !instance_->captureCallback_) {
+        return 1;
+    }
     if (foregroundProcess == GetCurrentProcessId()) {
         return CallNextHookEx(instance_->keyboardHook_, code, message, data);
     }
 
-    const auto* keyboard = reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
-    const UINT virtualKey = keyboard->vkCode;
     if (virtualKey >= instance_->keyboardDown_.size()) {
         return CallNextHookEx(instance_->keyboardHook_, code, message, data);
     }
@@ -260,7 +275,14 @@ LRESULT CALLBACK HotkeyManager::KeyboardHookProc(int code, WPARAM message, LPARA
         PostMessageW(instance_->window_, kMessageKeyboardHotkey, virtualKey, 0);
         return 1;
     }
-    if (instance_->keyboardDown_[virtualKey]) return 1;
+    if (instance_->keyboardDown_[virtualKey]) {
+        const bool matchingGesture = instance_->pending_ && !instance_->pending_->mouse &&
+            instance_->pending_->virtualKey == virtualKey;
+        const bool asynchronousDown =
+            (GetAsyncKeyState(static_cast<int>(virtualKey)) & 0x8000) != 0;
+        if (!ShouldRecoverStaleKeyDown(true, matchingGesture, asynchronousDown)) return 1;
+        instance_->keyboardDown_[virtualKey] = false;
+    }
 
     const UINT modifiers = CurrentModifiers();
     if (!instance_->FindKeyboardAction(virtualKey, modifiers)) {
@@ -337,7 +359,7 @@ DWORD HotkeyManager::RunRawInputThread() {
 
 void HotkeyManager::UpdateRawMouseRegistration() {
     if (const HWND rawWindow = rawInputWindow_.load()) {
-        SendMessageW(rawWindow, kUpdateRawInputRegistration,
+        PostMessageW(rawWindow, kUpdateRawInputRegistration,
                      NeedsRawMouseInput() ? TRUE : FALSE, 0);
     }
 }
@@ -357,7 +379,8 @@ bool HotkeyManager::NeedsRawMouseInput() const {
     if (captureCallback_ || !bindings_) return static_cast<bool>(captureCallback_);
     for (size_t index = 0; index < kHotkeyCount; ++index) {
         const HotkeyAction action = static_cast<HotkeyAction>(index);
-        if (IsActionActive(action) && IsMouseKey((*bindings_)[index].virtualKey)) return true;
+        const HotkeyBinding& binding = (*bindings_)[index];
+        if (binding.enabled && IsActionActive(action) && IsMouseKey(binding.virtualKey)) return true;
     }
     return false;
 }
@@ -382,7 +405,7 @@ std::optional<HotkeyAction> HotkeyManager::FindMouseAction(UINT virtualKey, UINT
     for (size_t index = 0; index < kHotkeyCount; ++index) {
         const HotkeyAction action = static_cast<HotkeyAction>(index);
         const HotkeyBinding& binding = (*bindings_)[index];
-        if (IsActionActive(action) && binding.virtualKey == virtualKey &&
+        if (binding.enabled && IsActionActive(action) && binding.virtualKey == virtualKey &&
             binding.modifiers == modifiers && IsMouseKey(virtualKey)) {
             return action;
         }
@@ -395,7 +418,7 @@ std::optional<HotkeyAction> HotkeyManager::FindKeyboardAction(UINT virtualKey, U
     for (size_t index = 0; index < kHotkeyCount; ++index) {
         const HotkeyAction action = static_cast<HotkeyAction>(index);
         const HotkeyBinding& binding = (*bindings_)[index];
-        if (IsActionActive(action) && binding.virtualKey == virtualKey &&
+        if (binding.enabled && IsActionActive(action) && binding.virtualKey == virtualKey &&
             binding.modifiers == modifiers && !IsMouseKey(virtualKey)) {
             return action;
         }
@@ -407,8 +430,9 @@ void HotkeyManager::TriggerAction(HotkeyAction action) {
     if (!callback_) return;
     if (action == HotkeyAction::Immersion || action == HotkeyAction::ToggleHidden) {
         const ULONGLONG now = GetTickCount64();
-        if (lastWindowActionAt_ != 0 && now - lastWindowActionAt_ < 250) return;
-        lastWindowActionAt_ = now;
+        const size_t index = action == HotkeyAction::Immersion ? 0U : 1U;
+        if (lastWindowActionAt_[index] != 0 && now - lastWindowActionAt_[index] < 250) return;
+        lastWindowActionAt_[index] = now;
     }
     callback_(action, HotkeyGesture::Trigger);
 }

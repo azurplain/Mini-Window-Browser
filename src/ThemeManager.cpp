@@ -186,25 +186,28 @@ void ThemeManager::DrawRoundedControl(HDC dc, const RECT& rect, COLORREF fill, C
                                       COLORREF background) const {
     bool rendered = false;
     if (d2dFactory_) {
-        D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(
-            D2D1_RENDER_TARGET_TYPE_DEFAULT,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
-        Microsoft::WRL::ComPtr<ID2D1DCRenderTarget> target;
-        if (SUCCEEDED(d2dFactory_->CreateDCRenderTarget(&properties, target.GetAddressOf())) && target &&
-            SUCCEEDED(target->BindDC(dc, &rect))) {
+        if (!dcRenderTarget_) {
+            const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(
+                D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+            d2dFactory_->CreateDCRenderTarget(&properties, dcRenderTarget_.GetAddressOf());
+        }
+        if (dcRenderTarget_ && SUCCEEDED(dcRenderTarget_->BindDC(dc, &rect))) {
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> fillBrush;
             Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> strokeBrush;
-            if (SUCCEEDED(target->CreateSolidColorBrush(ToD2D(fill), fillBrush.GetAddressOf())) &&
-                SUCCEEDED(target->CreateSolidColorBrush(ToD2D(stroke), strokeBrush.GetAddressOf()))) {
+            if (SUCCEEDED(dcRenderTarget_->CreateSolidColorBrush(ToD2D(fill), fillBrush.GetAddressOf())) &&
+                SUCCEEDED(dcRenderTarget_->CreateSolidColorBrush(ToD2D(stroke), strokeBrush.GetAddressOf()))) {
                 const D2D1_RECT_F local = D2D1::RectF(0.5f, 0.5f,
                     static_cast<float>(rect.right - rect.left) - 0.5f,
                     static_cast<float>(rect.bottom - rect.top) - 0.5f);
                 const D2D1_ROUNDED_RECT rounded{local, radius, radius};
-                target->BeginDraw();
-                target->Clear(ToD2D(background));
-                target->FillRoundedRectangle(rounded, fillBrush.Get());
-                target->DrawRoundedRectangle(rounded, strokeBrush.Get(), 1.0f);
-                rendered = SUCCEEDED(target->EndDraw());
+                dcRenderTarget_->BeginDraw();
+                dcRenderTarget_->Clear(ToD2D(background));
+                dcRenderTarget_->FillRoundedRectangle(rounded, fillBrush.Get());
+                dcRenderTarget_->DrawRoundedRectangle(rounded, strokeBrush.Get(), 1.0f);
+                const HRESULT drawResult = dcRenderTarget_->EndDraw();
+                rendered = SUCCEEDED(drawResult);
+                if (drawResult == D2DERR_RECREATE_TARGET) dcRenderTarget_.Reset();
             }
         }
     }

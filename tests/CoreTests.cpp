@@ -1,6 +1,7 @@
 #include "../src/AppModel.h"
 #include "../src/ConfigStore.h"
 #include "../src/CoreLogic.h"
+#include "../src/Diagnostics.h"
 #include "../src/MediaBridge.h"
 
 #include <windows.h>
@@ -36,6 +37,7 @@ void TestConfigMigration() {
     WritePrivateProfileStringW(L"Settings", L"HoldPlaybackRate", L"8", path.c_str());
     WritePrivateProfileStringW(L"Settings", L"HomeUrl", L"https://www.bilibili.com", path.c_str());
     WritePrivateProfileStringW(L"Session", L"TabCount", L"0", path.c_str());
+    WritePrivateProfileStringW(L"Hotkeys", L"Immersion", L"0,48", path.c_str());
 
     xiaochuang::AppState state;
     const xiaochuang::ConfigStore store(path);
@@ -49,10 +51,13 @@ void TestConfigMigration() {
     Check(!state.settings.autoFitVideoFullscreen, L"网页全屏比例适配默认关闭");
     Check(!state.settings.lockVideoFullscreenAspect, L"网页全屏比例锁定默认关闭");
     Check(!state.settings.maximizedTopDragEnabled, L"最大化顶部拖动恢复默认关闭");
+    Check(state.hotkeys[xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::Immersion)].enabled,
+          L"旧版双字段快捷键默认启用");
     Check(state.tabs.size() == 1, L"空旧会话自动生成主页标签");
 
     RECT rect{20, 30, 920, 630};
     Check(store.Save(state, rect, false), L"新配置可保存");
+    Check(!std::filesystem::exists(path.wstring() + L".tmp"), L"配置原子保存后不遗留临时文件");
     xiaochuang::AppState reloaded;
     Check(store.Load(reloaded), L"新配置可重新加载");
     Check(reloaded.settings.holeOpacityPercent == 100, L"新增配置往返一致");
@@ -73,6 +78,8 @@ void TestConfigMigration() {
     for (size_t index = 0; index < xiaochuang::kHotkeyCount; ++index) {
         reloaded.hotkeys[index].virtualKey = auditKeys[index];
         reloaded.hotkeys[index].modifiers = index % 2 == 0 ? MOD_CONTROL : 0;
+        reloaded.hotkeys[index].enabled = index != xiaochuang::HotkeyIndex(
+            xiaochuang::HotkeyAction::Previous);
     }
     Check(store.Save(reloaded, rect, false), L"全部快捷键绑定可保存");
     xiaochuang::AppState hotkeyReloaded;
@@ -82,9 +89,18 @@ void TestConfigMigration() {
         allHotkeysRoundTrip = allHotkeysRoundTrip &&
             hotkeyReloaded.hotkeys[index].virtualKey == auditKeys[index] &&
             hotkeyReloaded.hotkeys[index].modifiers ==
-                (index % 2 == 0 ? static_cast<UINT>(MOD_CONTROL) : 0U);
+                (index % 2 == 0 ? static_cast<UINT>(MOD_CONTROL) : 0U) &&
+            hotkeyReloaded.hotkeys[index].enabled ==
+                (index != xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::Previous));
     }
     Check(allHotkeysRoundTrip, L"键盘与鼠标侧键绑定完整往返且动作顺序不串位");
+
+    WritePrivateProfileStringW(L"Hotkeys", L"Forward", L"4294967295,0", path.c_str());
+    xiaochuang::AppState invalidHotkeyState;
+    Check(store.Load(invalidHotkeyState) &&
+          invalidHotkeyState.hotkeys[xiaochuang::HotkeyIndex(
+              xiaochuang::HotkeyAction::SeekForward)].virtualKey == L'6',
+          L"无效快捷键配置回退默认值");
 
     xiaochuang::Preset preset;
     preset.name = L"三标签";
@@ -93,6 +109,10 @@ void TestConfigMigration() {
                    {L"YouTube", L"https://www.youtube.com"}};
     preset.activeTab = 1;
     preset.currentUrl = preset.tabs[1].url;
+    preset.autoFitVideoFullscreen = true;
+    preset.lockVideoFullscreenAspect = true;
+    preset.maximizedTopDragEnabled = true;
+    preset.hotkeys[xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::Next)].enabled = false;
     reloaded.presets = {preset};
     Check(store.Save(reloaded, rect, false), L"多标签预设可保存");
     xiaochuang::AppState presetReloaded;
@@ -102,6 +122,13 @@ void TestConfigMigration() {
     Check(presetReloaded.presets[0].activeTab == 1 &&
           presetReloaded.presets[0].tabs[1].title == L"抖音",
           L"预设保存当前标签索引和标题");
+    Check(presetReloaded.presets[0].autoFitVideoFullscreen &&
+          presetReloaded.presets[0].lockVideoFullscreenAspect &&
+          presetReloaded.presets[0].maximizedTopDragEnabled,
+          L"预设保存网页全屏比例与顶部拖动设置");
+    Check(!presetReloaded.presets[0].hotkeys[xiaochuang::HotkeyIndex(
+              xiaochuang::HotkeyAction::Next)].enabled,
+          L"预设保存逐项快捷键启用状态");
 
     WritePrivateProfileSectionW(L"Presets", nullptr, path.c_str());
     WritePrivateProfileStringW(L"Presets", L"Count", L"1", path.c_str());
@@ -149,14 +176,19 @@ void TestInputAndMediaSelection() {
     Check(IsEditableClassName(L"Scintilla"), L"识别代码/聊天输入控件");
     Check(!IsEditableClassName(L"Chrome_WidgetWin_1"), L"非输入窗口不误判");
     Check(IsLikelyAutomationTextInput(true, true, true), L"明确可写的 UI Automation 编辑控件触发输入保护");
+    Check(IsLikelyAutomationTextInput(true, true, false, true), L"Electron TextPattern 编辑控件触发输入保护");
     Check(!IsLikelyAutomationTextInput(true, true, false), L"仅有编辑语义的自绘画布不误判");
     Check(!IsLikelyAutomationTextInput(false, true, true), L"仅有可写 Value 的渲染表面不误判");
-    Check(!IsLikelyAutomationTextInput(false, true, false), L"普通可聚焦网页文档不误判为输入框");
+    Check(!IsLikelyAutomationTextInput(false, true, false, true), L"普通可聚焦网页文档不误判为输入框");
     Check(!ShouldInspectTextInputProcess(false, false), L"启动时忽略旧外部窗口的遗留输入焦点");
     Check(ShouldInspectTextInputProcess(false, true), L"新外部焦点事件后启用跨程序输入保护");
     Check(ShouldInspectTextInputProcess(true, false), L"应用自身输入控件无需等待外部焦点事件");
     Check(ShouldApplyWebTypingGuard(true, true), L"小窗前台网页输入框触发输入保护");
     Check(!ShouldApplyWebTypingGuard(true, false), L"小窗失焦后不保留网页输入状态阻断媒体热键");
+    Check(ShouldRecoverStaleKeyDown(true, false, false), L"丢失抬起消息后下一次按键可自愈");
+    Check(!ShouldRecoverStaleKeyDown(true, true, false), L"有效长按手势不会被重复按下打断");
+    Check(ShouldForceReleaseMessageGesture(5000, false), L"消息型长按丢失抬起后超时恢复");
+    Check(!ShouldForceReleaseMessageGesture(4999, false), L"有效长按在超时前保持状态");
     Check(!IsUsableTextCaret(RECT{0, 0, 0, 0}, RECT{0, 0, 800, 600}, true),
           L"外部窗口零尺寸残留光标不误判为输入");
     Check(!IsUsableTextCaret(RECT{10, 10, 11, 28}, RECT{0, 0, 800, 600}, false),
@@ -172,6 +204,9 @@ void TestInputAndMediaSelection() {
     }
     Check(IsHoleMaskColumnTransparent(-100, 50) ==
           IsHoleMaskColumnTransparent(0, 50), L"挖孔掩码支持屏幕外负坐标");
+    Check(IsSupportedWebNavigationUrl(L"https://www.bilibili.com/video"), L"允许 HTTPS 网页地址");
+    Check(IsSupportedWebNavigationUrl(L"ABOUT:BLANK"), L"允许空白页地址");
+    Check(!IsSupportedWebNavigationUrl(L"javascript:alert(1)"), L"拒绝脚本伪协议导航");
     Check(SelectMediaSite(L"www.bilibili.com") == MediaSite::Bilibili, L"优先选择 Bilibili 适配器");
     Check(SelectMediaSite(L"www.douyin.com") == MediaSite::Douyin, L"选择抖音适配器");
     Check(SelectMediaSite(L"youtu.be") == MediaSite::YouTube, L"选择 YouTube 适配器");
@@ -284,6 +319,25 @@ void TestWindowGeometryHelpers() {
     Check(heightDriven.left == 100 && heightDriven.right == 868 &&
           heightDriven.top == 100 && heightDriven.bottom == 600,
           L"全屏拖动上下边缘时保持视频比例");
+    const RECT topSnappedImmersion = CalculateImmersionRect(
+        RECT{0, 0, 1000, 668}, monitor, 68, 20);
+    Check(topSnappedImmersion.left == 0 && topSnappedImmersion.top == 0 &&
+          topSnappedImmersion.right == 1000 && topSnappedImmersion.bottom == 600,
+          L"顶部吸附窗口进入沉浸后内容贴紧显示器顶部");
+    const RECT floatingImmersion = CalculateImmersionRect(
+        RECT{100, 100, 1100, 768}, monitor, 68, 20);
+    Check(floatingImmersion.top == 168 && floatingImmersion.bottom == 768,
+          L"普通位置进入沉浸仍保持网页内容的屏幕位置");
+}
+
+void TestScriptResultDecoding() {
+    using namespace xiaochuang;
+    Check(DecodeExecuteScriptString(L"\"hello\\nworld\"") == L"hello\nworld",
+          L"ExecuteScript 结果解码常用转义");
+    Check(DecodeExecuteScriptString(L"\"\\u4F60\\u597D\"") == L"你好",
+          L"ExecuteScript 结果解码 Unicode");
+    Check(DecodeExecuteScriptString(L"\"bad\\u12x4 tail\"") == L"bad\\u12x4 tail",
+          L"ExecuteScript 结果保留损坏 Unicode 转义");
 }
 
 } // namespace
@@ -297,6 +351,7 @@ int wmain() {
     TestMediaBridgeCommands();
     TestPresetNames();
     TestWindowGeometryHelpers();
+    TestScriptResultDecoding();
     if (failures == 0) {
         std::cout << "All XiaoChuang core tests passed.\n";
         return 0;

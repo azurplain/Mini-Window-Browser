@@ -109,13 +109,15 @@ bool IsEditableClassName(std::wstring className) {
 }
 
 bool IsLikelyAutomationTextInput(bool semanticTextControl, bool keyboardFocusable,
-                                 bool writableValuePattern) {
+                                 bool writableValuePattern, bool textPatternAvailable) {
     // Cross-process UI Automation providers used by Electron/Chromium launchers
     // sometimes expose their entire render surface as either an Edit control or
     // a writable Value provider.  Neither signal alone means the user is typing.
-    // Requiring all three preserves input protection for real edit controls while
-    // avoiding the focus-dependent hotkey shutdown on custom application canvases.
-    return semanticTextControl && keyboardFocusable && writableValuePattern;
+    // Electron/CEF edit controls frequently expose TextPattern instead of a
+    // writable ValuePattern. Keep the semantic and focusability requirements so
+    // an entire Chromium render surface is not mistaken for an input control.
+    return semanticTextControl && keyboardFocusable &&
+        (writableValuePattern || textPatternAvailable);
 }
 
 bool ShouldInspectTextInputProcess(bool foregroundIsApplication, bool externalObservationArmed) {
@@ -124,6 +126,16 @@ bool ShouldInspectTextInputProcess(bool foregroundIsApplication, bool externalOb
 
 bool ShouldApplyWebTypingGuard(bool webTyping, bool applicationForeground) {
     return webTyping && applicationForeground;
+}
+
+bool ShouldRecoverStaleKeyDown(bool knownDown, bool matchingGesturePending,
+                               bool asynchronousKeyDown) {
+    return knownDown && !matchingGesturePending && !asynchronousKeyDown;
+}
+
+bool ShouldForceReleaseMessageGesture(std::uint64_t elapsedMilliseconds,
+                                      bool asynchronousKeyDown) {
+    return elapsedMilliseconds >= 5000 && !asynchronousKeyDown;
 }
 
 bool IsUsableTextCaret(const RECT& caretRect, const RECT& clientRect,
@@ -269,6 +281,27 @@ RECT ConstrainAspectSizingRect(RECT proposedRect, UINT sizingEdge, int chromeHei
         else proposedRect.bottom = proposedRect.top + height;
     }
     return proposedRect;
+}
+
+bool IsSupportedWebNavigationUrl(std::wstring url) {
+    std::transform(url.begin(), url.end(), url.begin(),
+        [](wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
+    return url.starts_with(L"https://") || url.starts_with(L"http://") ||
+        url.starts_with(L"file://") || url == L"about:blank";
+}
+
+RECT CalculateImmersionRect(const RECT& normalRect, const RECT& monitorRect,
+                            int chromeHeight, int snapThreshold) {
+    const int width = std::max(1, static_cast<int>(normalRect.right - normalRect.left));
+    const int height = std::max(1,
+        static_cast<int>(normalRect.bottom - normalRect.top) - std::max(0, chromeHeight));
+    int top = normalRect.top + std::max(0, chromeHeight);
+    if (std::abs(normalRect.top - monitorRect.top) <= std::max(0, snapThreshold)) {
+        // When the normal window is attached to the physical top edge, removing
+        // its chrome must pull the remaining WebView up instead of leaving a gap.
+        top = monitorRect.top;
+    }
+    return RECT{normalRect.left, top, normalRect.left + width, top + height};
 }
 
 } // namespace xiaochuang

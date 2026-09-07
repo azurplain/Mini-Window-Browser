@@ -47,16 +47,28 @@ void ReadHotkey(const std::filesystem::path& path, const wchar_t* section,
     }
     unsigned int modifiers = 0;
     unsigned int virtualKey = 0;
-    if (swscanf_s(encoded.c_str(), L"%u,%u", &modifiers, &virtualKey) == 2) {
-        binding.modifiers = modifiers;
-        binding.virtualKey = virtualKey;
+    unsigned int enabled = 1;
+    const int fields = swscanf_s(encoded.c_str(), L"%u,%u,%u", &modifiers, &virtualKey, &enabled);
+    if (fields >= 2) {
+        constexpr UINT kAllowedModifiers = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
+        const bool validModifiers = (modifiers & ~kAllowedModifiers) == 0;
+        const bool validVirtualKey = virtualKey > 0 && virtualKey < 256 &&
+            virtualKey != VK_CONTROL && virtualKey != VK_SHIFT && virtualKey != VK_MENU &&
+            virtualKey != VK_LWIN && virtualKey != VK_RWIN;
+        if (validModifiers && validVirtualKey) {
+            binding.modifiers = modifiers;
+            binding.virtualKey = virtualKey;
+            if (fields >= 3) binding.enabled = enabled != 0;
+        }
     }
 }
 
 void WriteHotkey(const std::filesystem::path& path, const wchar_t* section,
                  const std::wstring& key, const HotkeyBinding& binding) {
     WriteString(path, section, key,
-                std::to_wstring(binding.modifiers) + L"," + std::to_wstring(binding.virtualKey));
+                std::to_wstring(binding.modifiers) + L"," +
+                std::to_wstring(binding.virtualKey) + L"," +
+                std::to_wstring(binding.enabled ? 1 : 0));
 }
 
 const std::array<const wchar_t*, kHotkeyCount> kHotkeyKeys = {
@@ -64,8 +76,8 @@ const std::array<const wchar_t*, kHotkeyCount> kHotkeyKeys = {
 };
 
 RECT MakeRect(int x, int y, int width, int height) {
-    width = std::max(width, 360);
-    height = std::max(height, 240);
+    width = std::max(width, 160);
+    height = std::max(height, 120);
     return RECT{x, y, x + width, y + height};
 }
 
@@ -160,6 +172,9 @@ bool ConfigStore::Load(AppState& state) const {
         preset.disableHotkeysOnTyping = ReadInt(path_, kPresets, prefix + L"HkTyping", 1) != 0;
         preset.useSystemTray = ReadInt(path_, kPresets, prefix + L"SysTray", 0) != 0;
         preset.backgroundMediaHotkeys = ReadInt(path_, kPresets, prefix + L"BackgroundMedia", 0) != 0;
+        preset.autoFitVideoFullscreen = ReadInt(path_, kPresets, prefix + L"AutoFitVideo", 0) != 0;
+        preset.lockVideoFullscreenAspect = ReadInt(path_, kPresets, prefix + L"LockVideoAspect", 0) != 0;
+        preset.maximizedTopDragEnabled = ReadInt(path_, kPresets, prefix + L"MaxTopDrag", 0) != 0;
         preset.immersionStyle = static_cast<ImmersionStyle>(
             std::clamp(ReadInt(path_, kPresets, prefix + L"ImmStyle", 0), 0, 1));
         preset.homeUrl = ReadString(path_, kPresets, prefix + L"HomeUrl", state.settings.homeUrl);
@@ -196,98 +211,115 @@ bool ConfigStore::Load(AppState& state) const {
 }
 
 bool ConfigStore::Save(const AppState& state, const RECT& normalRect, bool maximized) const {
+    std::filesystem::path transactionPath = path_;
+    transactionPath += L".tmp";
+    DeleteFileW(transactionPath.c_str());
+    if (GetFileAttributesW(path_.c_str()) != INVALID_FILE_ATTRIBUTES &&
+        !CopyFileW(path_.c_str(), transactionPath.c_str(), FALSE)) {
+        return false;
+    }
     const AppSettings& settings = state.settings;
-    WriteInt(path_, kSettings, L"HoleRadius", settings.holeRadius);
-    WriteInt(path_, kSettings, L"SnapThreshold", settings.snapThreshold);
-    WriteInt(path_, kSettings, L"HoleOpacityPercent", settings.holeOpacityPercent);
-    WriteInt(path_, kSettings, L"AutoHideOpacityPercent", settings.autoHideOpacityPercent);
-    WriteInt(path_, kSettings, L"HoldPlaybackRate", settings.holdPlaybackRate);
-    WriteInt(path_, kSettings, L"AutoPause", settings.autoPauseOnHide ? 1 : 0);
-    WriteInt(path_, kSettings, L"DisableHkOnTyping", settings.disableHotkeysOnTyping ? 1 : 0);
-    WriteInt(path_, kSettings, L"SystemTray", settings.useSystemTray ? 1 : 0);
-    WriteInt(path_, kSettings, L"BackgroundMediaHotkeys", settings.backgroundMediaHotkeys ? 1 : 0);
-    WriteInt(path_, kSettings, L"AutoFitVideoFullscreen", settings.autoFitVideoFullscreen ? 1 : 0);
-    WriteInt(path_, kSettings, L"LockVideoFullscreenAspect", settings.lockVideoFullscreenAspect ? 1 : 0);
-    WriteInt(path_, kSettings, L"MaximizedTopDragEnabled", settings.maximizedTopDragEnabled ? 1 : 0);
-    WriteInt(path_, kSettings, L"ImmersionStyle", static_cast<int>(settings.immersionStyle));
-    WriteString(path_, kSettings, L"RenderMode",
+    WriteInt(transactionPath, kSettings, L"HoleRadius", settings.holeRadius);
+    WriteInt(transactionPath, kSettings, L"SnapThreshold", settings.snapThreshold);
+    WriteInt(transactionPath, kSettings, L"HoleOpacityPercent", settings.holeOpacityPercent);
+    WriteInt(transactionPath, kSettings, L"AutoHideOpacityPercent", settings.autoHideOpacityPercent);
+    WriteInt(transactionPath, kSettings, L"HoldPlaybackRate", settings.holdPlaybackRate);
+    WriteInt(transactionPath, kSettings, L"AutoPause", settings.autoPauseOnHide ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"DisableHkOnTyping", settings.disableHotkeysOnTyping ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"SystemTray", settings.useSystemTray ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"BackgroundMediaHotkeys", settings.backgroundMediaHotkeys ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"AutoFitVideoFullscreen", settings.autoFitVideoFullscreen ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"LockVideoFullscreenAspect", settings.lockVideoFullscreenAspect ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"MaximizedTopDragEnabled", settings.maximizedTopDragEnabled ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"ImmersionStyle", static_cast<int>(settings.immersionStyle));
+    WriteString(transactionPath, kSettings, L"RenderMode",
                 settings.renderMode == RenderMode::SoftwareCompatibility ? L"Software" : L"Auto");
     const wchar_t* theme = L"System";
     if (settings.themeMode == ThemeMode::Light) theme = L"Light";
     else if (settings.themeMode == ThemeMode::Dark) theme = L"Dark";
-    WriteString(path_, kSettings, L"Theme", theme);
-    WriteString(path_, kSettings, L"HomeUrl", settings.homeUrl);
+    WriteString(transactionPath, kSettings, L"Theme", theme);
+    WriteString(transactionPath, kSettings, L"HomeUrl", settings.homeUrl);
 
-    WritePrivateProfileSectionW(kSession, nullptr, path_.c_str());
-    WriteInt(path_, kSession, L"WinX", normalRect.left);
-    WriteInt(path_, kSession, L"WinY", normalRect.top);
-    WriteInt(path_, kSession, L"WinW", normalRect.right - normalRect.left);
-    WriteInt(path_, kSession, L"WinH", normalRect.bottom - normalRect.top);
-    WriteInt(path_, kSession, L"Fullscreen", maximized ? 1 : 0);
-    WriteInt(path_, kSession, L"ActiveTab", state.currentTabIndex);
-    WriteInt(path_, kSession, L"TabCount", static_cast<int>(state.tabs.size()));
+    WritePrivateProfileSectionW(kSession, nullptr, transactionPath.c_str());
+    WriteInt(transactionPath, kSession, L"WinX", normalRect.left);
+    WriteInt(transactionPath, kSession, L"WinY", normalRect.top);
+    WriteInt(transactionPath, kSession, L"WinW", normalRect.right - normalRect.left);
+    WriteInt(transactionPath, kSession, L"WinH", normalRect.bottom - normalRect.top);
+    WriteInt(transactionPath, kSession, L"Fullscreen", maximized ? 1 : 0);
+    WriteInt(transactionPath, kSession, L"ActiveTab", state.currentTabIndex);
+    WriteInt(transactionPath, kSession, L"TabCount", static_cast<int>(state.tabs.size()));
     for (size_t index = 0; index < state.tabs.size(); ++index) {
-        WriteString(path_, kSession, L"TabUrl" + std::to_wstring(index), state.tabs[index].url);
-        WriteString(path_, kSession, L"TabTitle" + std::to_wstring(index), state.tabs[index].title);
+        WriteString(transactionPath, kSession, L"TabUrl" + std::to_wstring(index), state.tabs[index].url);
+        WriteString(transactionPath, kSession, L"TabTitle" + std::to_wstring(index), state.tabs[index].title);
     }
 
-    WritePrivateProfileSectionW(kHotkeys, nullptr, path_.c_str());
+    WritePrivateProfileSectionW(kHotkeys, nullptr, transactionPath.c_str());
     for (size_t index = 0; index < kHotkeyCount; ++index) {
-        WriteHotkey(path_, kHotkeys, kHotkeyKeys[index], state.hotkeys[index]);
+        WriteHotkey(transactionPath, kHotkeys, kHotkeyKeys[index], state.hotkeys[index]);
     }
 
-    WritePrivateProfileSectionW(kBookmarks, nullptr, path_.c_str());
-    WriteInt(path_, kBookmarks, L"Count", static_cast<int>(state.bookmarks.size()));
+    WritePrivateProfileSectionW(kBookmarks, nullptr, transactionPath.c_str());
+    WriteInt(transactionPath, kBookmarks, L"Count", static_cast<int>(state.bookmarks.size()));
     for (size_t index = 0; index < state.bookmarks.size(); ++index) {
-        WriteString(path_, kBookmarks, L"Title" + std::to_wstring(index), state.bookmarks[index].title);
-        WriteString(path_, kBookmarks, L"Url" + std::to_wstring(index), state.bookmarks[index].url);
+        WriteString(transactionPath, kBookmarks, L"Title" + std::to_wstring(index), state.bookmarks[index].title);
+        WriteString(transactionPath, kBookmarks, L"Url" + std::to_wstring(index), state.bookmarks[index].url);
     }
 
-    WritePrivateProfileSectionW(kPresets, nullptr, path_.c_str());
-    WriteInt(path_, kPresets, L"Count", static_cast<int>(state.presets.size()));
+    WritePrivateProfileSectionW(kPresets, nullptr, transactionPath.c_str());
+    WriteInt(transactionPath, kPresets, L"Count", static_cast<int>(state.presets.size()));
     const std::array<const wchar_t*, kHotkeyCount> suffixes = {
         L"HkImm", L"HkPlay", L"HkBack", L"HkFwd", L"HkPrev", L"HkNext", L"HkHide"
     };
     for (size_t index = 0; index < state.presets.size(); ++index) {
         const Preset& preset = state.presets[index];
         const std::wstring prefix = L"P" + std::to_wstring(index) + L"_";
-        WriteString(path_, kPresets, prefix + L"Name", preset.name);
-        WriteString(path_, kPresets, prefix + L"HomeUrl", preset.homeUrl);
-        WriteString(path_, kPresets, prefix + L"CurUrl", preset.currentUrl);
+        WriteString(transactionPath, kPresets, prefix + L"Name", preset.name);
+        WriteString(transactionPath, kPresets, prefix + L"HomeUrl", preset.homeUrl);
+        WriteString(transactionPath, kPresets, prefix + L"CurUrl", preset.currentUrl);
         const std::wstring currentTitle = !preset.tabs.empty()
             ? preset.tabs[static_cast<size_t>(std::clamp(
                 preset.activeTab, 0, static_cast<int>(preset.tabs.size()) - 1))].title
             : L"正在加载…";
-        WriteString(path_, kPresets, prefix + L"CurTitle", currentTitle);
-        WriteInt(path_, kPresets, prefix + L"TabCount", static_cast<int>(preset.tabs.size()));
-        WriteInt(path_, kPresets, prefix + L"ActiveTab", preset.activeTab);
+        WriteString(transactionPath, kPresets, prefix + L"CurTitle", currentTitle);
+        WriteInt(transactionPath, kPresets, prefix + L"TabCount", static_cast<int>(preset.tabs.size()));
+        WriteInt(transactionPath, kPresets, prefix + L"ActiveTab", preset.activeTab);
         for (size_t tabIndex = 0; tabIndex < preset.tabs.size(); ++tabIndex) {
             const std::wstring tabPrefix = prefix + L"Tab" + std::to_wstring(tabIndex) + L"_";
-            WriteString(path_, kPresets, tabPrefix + L"Url", preset.tabs[tabIndex].url);
-            WriteString(path_, kPresets, tabPrefix + L"Title", preset.tabs[tabIndex].title);
+            WriteString(transactionPath, kPresets, tabPrefix + L"Url", preset.tabs[tabIndex].url);
+            WriteString(transactionPath, kPresets, tabPrefix + L"Title", preset.tabs[tabIndex].title);
         }
-        WriteInt(path_, kPresets, prefix + L"X", preset.normalRect.left);
-        WriteInt(path_, kPresets, prefix + L"Y", preset.normalRect.top);
-        WriteInt(path_, kPresets, prefix + L"W", preset.normalRect.right - preset.normalRect.left);
-        WriteInt(path_, kPresets, prefix + L"H", preset.normalRect.bottom - preset.normalRect.top);
-        WriteInt(path_, kPresets, prefix + L"Fullscreen", preset.maximized ? 1 : 0);
-        WriteInt(path_, kPresets, prefix + L"Rad", preset.holeRadius);
-        WriteInt(path_, kPresets, prefix + L"Snap", preset.snapThreshold);
-        WriteInt(path_, kPresets, prefix + L"HoleOpacity", preset.holeOpacityPercent);
-        WriteInt(path_, kPresets, prefix + L"AutoHideOpacity", preset.autoHideOpacityPercent);
-        WriteInt(path_, kPresets, prefix + L"HoldRate", preset.holdPlaybackRate);
-        WriteInt(path_, kPresets, prefix + L"Pause", preset.autoPauseOnHide ? 1 : 0);
-        WriteInt(path_, kPresets, prefix + L"HkTyping", preset.disableHotkeysOnTyping ? 1 : 0);
-        WriteInt(path_, kPresets, prefix + L"SysTray", preset.useSystemTray ? 1 : 0);
-        WriteInt(path_, kPresets, prefix + L"BackgroundMedia", preset.backgroundMediaHotkeys ? 1 : 0);
-        WriteInt(path_, kPresets, prefix + L"ImmStyle", static_cast<int>(preset.immersionStyle));
+        WriteInt(transactionPath, kPresets, prefix + L"X", preset.normalRect.left);
+        WriteInt(transactionPath, kPresets, prefix + L"Y", preset.normalRect.top);
+        WriteInt(transactionPath, kPresets, prefix + L"W", preset.normalRect.right - preset.normalRect.left);
+        WriteInt(transactionPath, kPresets, prefix + L"H", preset.normalRect.bottom - preset.normalRect.top);
+        WriteInt(transactionPath, kPresets, prefix + L"Fullscreen", preset.maximized ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"Rad", preset.holeRadius);
+        WriteInt(transactionPath, kPresets, prefix + L"Snap", preset.snapThreshold);
+        WriteInt(transactionPath, kPresets, prefix + L"HoleOpacity", preset.holeOpacityPercent);
+        WriteInt(transactionPath, kPresets, prefix + L"AutoHideOpacity", preset.autoHideOpacityPercent);
+        WriteInt(transactionPath, kPresets, prefix + L"HoldRate", preset.holdPlaybackRate);
+        WriteInt(transactionPath, kPresets, prefix + L"Pause", preset.autoPauseOnHide ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"HkTyping", preset.disableHotkeysOnTyping ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"SysTray", preset.useSystemTray ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"BackgroundMedia", preset.backgroundMediaHotkeys ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"AutoFitVideo", preset.autoFitVideoFullscreen ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"LockVideoAspect", preset.lockVideoFullscreenAspect ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"MaxTopDrag", preset.maximizedTopDragEnabled ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"ImmStyle", static_cast<int>(preset.immersionStyle));
         for (size_t hotkeyIndex = 0; hotkeyIndex < kHotkeyCount; ++hotkeyIndex) {
-            WriteHotkey(path_, kPresets, prefix + suffixes[hotkeyIndex], preset.hotkeys[hotkeyIndex]);
+            WriteHotkey(transactionPath, kPresets, prefix + suffixes[hotkeyIndex], preset.hotkeys[hotkeyIndex]);
         }
     }
-    WritePrivateProfileStringW(nullptr, nullptr, nullptr, path_.c_str());
+    WritePrivateProfileStringW(nullptr, nullptr, nullptr, transactionPath.c_str());
     std::error_code error;
-    return std::filesystem::exists(path_, error) && !error;
+    if (!std::filesystem::exists(transactionPath, error) || error) return false;
+    const DWORD replaceFlags = REPLACEFILE_WRITE_THROUGH;
+    if (ReplaceFileW(path_.c_str(), transactionPath.c_str(), nullptr,
+                     replaceFlags, nullptr, nullptr)) return true;
+    if (MoveFileExW(transactionPath.c_str(), path_.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+    DeleteFileW(transactionPath.c_str());
+    return false;
 }
 
 std::wstring NormalizeInputUrl(const std::wstring& input) {

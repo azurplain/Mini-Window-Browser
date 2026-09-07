@@ -191,7 +191,7 @@ bool Application::Initialize(HINSTANCE instance, int showCommand) {
         state_.session.maximized, chromeHeight_,
         [this](bool visible) { ShowChrome(visible); },
         [this]() { LayoutMainControls(); });
-    hotkeys_.Start(mainWindow_, &state_.hotkeys,
+    hotkeysStarted_ = hotkeys_.Start(mainWindow_, &state_.hotkeys,
         [this](HotkeyAction action, HotkeyGesture gesture) { ExecuteMediaAction(action, gesture); });
     // Register defaults before the window is shown. InputGuard used to sample the
     // launcher/editor focus here and immediately unregister every hotkey.
@@ -202,9 +202,11 @@ bool Application::Initialize(HINSTANCE instance, int showCommand) {
 
     ShowWindow(mainWindow_, showCommand == SW_HIDE ? SW_SHOWNORMAL : showCommand);
     UpdateWindow(mainWindow_);
-    inputGuard_.Start(mainWindow_, [this](bool) { RefreshHotkeys(); });
+    inputGuardStarted_ = inputGuard_.Start(mainWindow_, [this](bool) { RefreshHotkeys(); });
     inputGuard_.SetNativeEdit(addressEdit_);
+    inputGuard_.SetEnabled(state_.settings.disableHotkeysOnTyping);
     SetTimer(mainWindow_, kInputFallbackTimerId, 1000, nullptr);
+    lastHeartbeatTick_ = GetTickCount64();
     inputGuard_.Refresh();
     RefreshHotkeys();
     windowModes_.ReassertTopmost();
@@ -500,9 +502,6 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         else if (id == Bookmarks) ShowBookmarkMenu();
         else if (id == Presets) ShowPresetWindow();
         else if (id == Settings) ShowSettingsWindow();
-        else if (id == Address && (HIWORD(wParam) == EN_SETFOCUS || HIWORD(wParam) == EN_KILLFOCUS)) {
-            PostMessageW(window, kMessageInputFocusChanged, 0, 0);
-        }
         return 0;
     }
     case WM_NOTIFY: {
@@ -527,19 +526,24 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         SaveConfiguration();
         return 0;
     case WM_SIZE:
-        if (wParam == SIZE_MINIMIZED && state_.settings.useSystemTray) {
-            SetHidden(true);
-        } else {
-            if (wParam != SIZE_MINIMIZED && !windowModes_.IsHidden() &&
-                !waitingForTabContent_ && webViewController_) {
-                webViewController_->put_IsVisible(TRUE);
-            }
-            LayoutMainControls();
+        if (wParam == SIZE_MINIMIZED) {
+            if (state_.settings.useSystemTray) SetHidden(true);
+            return 0;
         }
+        if (!windowModes_.IsHidden() && !waitingForTabContent_ && webViewController_) {
+            webViewController_->put_IsVisible(TRUE);
+        }
+        LayoutMainControls();
         return 0;
     case WM_WINDOWPOSCHANGED:
-        LayoutMainControls();
-        if (webViewController_) webViewController_->NotifyParentWindowPositionChanged();
+        if (const auto* position = reinterpret_cast<const WINDOWPOS*>(lParam)) {
+            const bool moved = (position->flags & SWP_NOMOVE) == 0;
+            const bool sized = (position->flags & SWP_NOSIZE) == 0;
+            if (sized) LayoutMainControls();
+            if (webViewController_ && (moved || sized)) {
+                webViewController_->NotifyParentWindowPositionChanged();
+            }
+        }
         break;
     case WM_ACTIVATE:
         if (LOWORD(wParam) != WA_INACTIVE) {
@@ -578,11 +582,21 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         hotkeys_.HandleKeyboardMessage(wParam, lParam);
         return 0;
     case kMessageInputFocusChanged:
-        inputGuard_.Refresh();
-        windowModes_.ReassertTopmost();
+        SetTimer(window, kInputDebounceTimerId, 180, nullptr);
+        return 0;
+    case kMessageInputGuardResult:
+        inputGuard_.HandleAsyncResult(lParam);
         return 0;
     case kCloseTabMessage:
         CloseTab(static_cast<int>(wParam));
+        return 0;
+    case kDeferredNewTabMessage: {
+        std::unique_ptr<std::wstring> uri(reinterpret_cast<std::wstring*>(lParam));
+        if (uri && !uri->empty()) CreateNewTab(*uri, SuggestedTitleForUrl(*uri), true);
+        return 0;
+    }
+    case kRecreateWebViewMessage:
+        RecreateWebView();
         return 0;
     case kShowRegistrationErrors:
         ShowHotkeyErrors();
@@ -590,7 +604,32 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
     case WM_TIMER:
         if (wParam == kHotkeyHoldTimerId) hotkeys_.Tick();
         else if (wParam == kImmersionTimerId) windowModes_.OnImmersionTimer();
-        else if (wParam == kInputFallbackTimerId) inputGuard_.Refresh();
+        else if (wParam == kInputFallbackTimerId) {
+            const ULONGLONG now = GetTickCount64();
+            if (lastHeartbeatTick_ != 0) {
+                maximumHeartbeatDelay_ = std::max(maximumHeartbeatDelay_, now - lastHeartbeatTick_);
+            }
+            lastHeartbeatTick_ = now;
+            inputGuard_.Refresh();
+        }
+        else if (wParam == kInputDebounceTimerId) {
+            KillTimer(window, kInputDebounceTimerId);
+            const bool foregroundChanged = inputGuard_.ConsumePendingEvents();
+            inputGuard_.Refresh();
+            if (foregroundChanged) windowModes_.ReassertTopmost();
+        }
+        else if (wParam == kContentWaitTimerId) {
+            EndContentWait();
+            if (state_.currentTabIndex >= 0 &&
+                state_.currentTabIndex < static_cast<int>(state_.tabs.size())) {
+                TabData& tab = state_.tabs[static_cast<size_t>(state_.currentTabIndex)];
+                if (IsPlaceholderTabTitle(tab.title)) UpdateCurrentTabTitle(SuggestedTitleForUrl(tab.url));
+            }
+        }
+        else if (wParam == kHotkeyRegistrationRetryTimerId) {
+            KillTimer(window, kHotkeyRegistrationRetryTimerId);
+            RefreshHotkeys();
+        }
         return 0;
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE && windowModes_.IsWebFullscreen()) {
@@ -632,6 +671,9 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         return 0;
     case kGetHotkeyCountSmokeMessage:
         return wParam < kHotkeyCount ? smokeHotkeyCounts_[wParam] : 0;
+    case kGetInputTypingSmokeMessage:
+        return (inputGuard_.IsTyping() ? 1 : 0) |
+            (hotkeys_.IsInputSuppressed() ? 2 : 0);
 #endif
     case WM_CLOSE:
         DestroyWindow(window);
@@ -766,8 +808,13 @@ LRESULT CALLBACK Application::AddressProc(HWND window, UINT message, WPARAM wPar
     }
     if (message == WM_SETFOCUS) {
         SendMessageW(window, EM_SETSEL, 0, -1);
+        // Native controls are cheap to inspect. Refresh immediately so there is
+        // no window in which a global hotkey can slip through while the user is
+        // already typing; keep the posted refresh for cross-process focus/UIA.
+        application->inputGuard_.Refresh();
         PostMessageW(application->mainWindow_, kMessageInputFocusChanged, 0, 0);
     } else if (message == WM_KILLFOCUS) {
+        application->inputGuard_.Refresh();
         PostMessageW(application->mainWindow_, kMessageInputFocusChanged, 0, 0);
     }
     return CallWindowProcW(application->oldAddressProc_, window, message, wParam, lParam);
@@ -889,12 +936,7 @@ void Application::ConfigureWebViewEvents() {
                 if (args) args->get_NavigationId(&navigationId);
                 if (!waitingForTabContent_ ||
                     (waitingNavigationId_ != 0 && navigationId != waitingNavigationId_)) return S_OK;
-                waitingForTabContent_ = false;
-                waitingNavigationId_ = 0;
-                if (webViewController_ && !windowModes_.IsHidden()) {
-                    webViewController_->put_IsVisible(TRUE);
-                }
-                InvalidateRect(mainWindow_, nullptr, FALSE);
+                EndContentWait();
                 return S_OK;
             }).Get(), &contentLoadingToken_);
     webView_->add_NavigationCompleted(
@@ -905,12 +947,7 @@ void Application::ConfigureWebViewEvents() {
                 if (waitingForTabContent_ && waitingNavigationId_ != 0 &&
                     navigationId != waitingNavigationId_) return S_OK;
                 if (waitingForTabContent_) {
-                    waitingForTabContent_ = false;
-                    waitingNavigationId_ = 0;
-                    if (webViewController_ && !windowModes_.IsHidden()) {
-                        webViewController_->put_IsVisible(TRUE);
-                    }
-                    InvalidateRect(mainWindow_, nullptr, FALSE);
+                    EndContentWait();
                 }
                 wil::unique_cotaskmem_string source;
                 if (webView_ && SUCCEEDED(webView_->get_Source(&source)) && source) {
@@ -968,10 +1005,32 @@ void Application::ConfigureWebViewEvents() {
                 wil::unique_cotaskmem_string uri;
                 if (args && SUCCEEDED(args->get_Uri(&uri)) && uri) {
                     args->put_Handled(TRUE);
-                    CreateNewTab(uri.get(), L"新标签页", true);
+                    if (IsSupportedWebNavigationUrl(uri.get())) {
+                        auto deferredUri = std::make_unique<std::wstring>(uri.get());
+                        if (PostMessageW(mainWindow_, kDeferredNewTabMessage, 0,
+                                         reinterpret_cast<LPARAM>(deferredUri.get()))) {
+                            deferredUri.release();
+                        }
+                    }
                 }
                 return S_OK;
             }).Get(), &newWindowToken_);
+    webView_->add_WindowCloseRequested(
+        Callback<ICoreWebView2WindowCloseRequestedEventHandler>(
+            [this](ICoreWebView2*, IUnknown*) -> HRESULT {
+                PostMessageW(mainWindow_, kCloseTabMessage,
+                             static_cast<WPARAM>(state_.currentTabIndex), 0);
+                return S_OK;
+            }).Get(), &windowCloseToken_);
+    wil::com_ptr<ICoreWebView2_4> webView4;
+    if (webView_.try_query_to(&webView4) && webView4) {
+        webView4->add_DownloadStarting(
+            Callback<ICoreWebView2DownloadStartingEventHandler>(
+                [this](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs*) -> HRESULT {
+                    EndContentWait();
+                    return S_OK;
+                }).Get(), &downloadToken_);
+    }
     webView_->add_ProcessFailed(
         Callback<ICoreWebView2ProcessFailedEventHandler>(
             [this](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs* args) -> HRESULT {
@@ -1040,10 +1099,17 @@ void Application::ExecuteMediaAction(HotkeyAction action, HotkeyGesture gesture)
 
 void Application::RequestMediaDiagnostics() {
     std::wstring base = BuildSystemDiagnostics(state_, webViewVersion_, windowModes_.Mode());
+    base += L"Hotkey manager: ";
+    base += hotkeysStarted_ ? L"started\r\n" : L"startup incomplete\r\n";
+    base += L"Input guard: ";
+    base += inputGuardStarted_ ? L"started, " : L"startup incomplete, ";
+    base += inputGuard_.StatusText() + L"\r\n";
+    base += L"UI heartbeat maximum delay: " + std::to_wstring(maximumHeartbeatDelay_) + L" ms\r\n";
     if (!webView_) {
-        CopyTextToClipboard(mainWindow_, base);
+        const bool copied = CopyTextToClipboard(mainWindow_, base);
         MessageBoxW(settingsWindow_ ? settingsWindow_ : mainWindow_,
-                    (base + L"\n\n诊断信息已复制到剪贴板。").c_str(),
+                    (base + (copied ? L"\n\n诊断信息已复制到剪贴板。" :
+                                      L"\n\n无法写入剪贴板，请稍后重试。")).c_str(),
                     L"小窗浏览器诊断", MB_OK | MB_ICONINFORMATION);
         return;
     }
@@ -1053,9 +1119,10 @@ void Application::RequestMediaDiagnostics() {
                 std::wstring report = base;
                 report += L"\n活动媒体: ";
                 report += SUCCEEDED(result) && value ? DecodeExecuteScriptString(value) : L"无法读取";
-                CopyTextToClipboard(mainWindow_, report);
+                const bool copied = CopyTextToClipboard(mainWindow_, report);
                 MessageBoxW(settingsWindow_ ? settingsWindow_ : mainWindow_,
-                            (report + L"\n\n诊断信息已复制到剪贴板。").c_str(),
+                            (report + (copied ? L"\n\n诊断信息已复制到剪贴板。" :
+                                                L"\n\n无法写入剪贴板，请稍后重试。")).c_str(),
                             L"小窗浏览器诊断", MB_OK | MB_ICONINFORMATION);
                 return S_OK;
             }).Get());
@@ -1077,10 +1144,12 @@ void Application::HandleWebFullscreenChanged() {
     if (SUCCEEDED(webView_->get_ContainsFullScreenElement(&fullscreen))) {
         if (!fullscreen) {
             windowModes_.LeaveWebFullscreen();
+            hotkeys_.SetImmersiveWebFullscreen(false);
             return;
         }
 
         windowModes_.EnterWebFullscreen();
+        hotkeys_.SetImmersiveWebFullscreen(windowModes_.IsImmersive());
         if (!state_.settings.autoFitVideoFullscreen) return;
         static constexpr wchar_t script[] = LR"JS((()=>{
 const root=document.fullscreenElement;if(!root)return 0;
@@ -1105,20 +1174,27 @@ return width>0&&height>0?width/height:0})())JS";
 
 void Application::HandleProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND kind) {
     hotkeys_.CancelActiveGesture();
-    waitingForTabContent_ = false;
-    waitingNavigationId_ = 0;
+    EndContentWait();
     if (kind == COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED ||
         kind == COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED) {
         if (webView_) webView_->Reload();
         return;
     }
-    MessageBoxW(mainWindow_, L"WebView2 浏览器进程意外退出，将尝试重建网页视图。",
-                L"网页进程恢复", MB_OK | MB_ICONWARNING);
+    if (!webViewRecoveryPending_) {
+        webViewRecoveryPending_ = true;
+        PostMessageW(mainWindow_, kRecreateWebViewMessage, 0, 0);
+    }
+}
+
+void Application::RecreateWebView() {
+    if (shuttingDown_) return;
+    webViewRecoveryPending_ = false;
     if (webViewController_) webViewController_->Close();
     webView_.reset();
     webViewController_.reset();
     webViewEnvironment_.reset();
     webViewReady_ = false;
+    InvalidateRect(mainWindow_, nullptr, TRUE);
     InitializeWebView();
 }
 
@@ -1180,9 +1256,7 @@ void Application::SwitchTab(int index) {
     SetWindowTextW(addressEdit_, tab.url.c_str());
     UpdateBookmarkStar();
     if (webViewReady_) {
-        navigatingFromTabSwitch_ = true;
         NavigateTo(tab.url, true);
-        navigatingFromTabSwitch_ = false;
     }
     SaveConfiguration();
 }
@@ -1239,6 +1313,14 @@ std::wstring Application::SuggestedTitleForUrl(const std::wstring& url) const {
         if (NormalizeComparableUrl(tab.url) == key && !IsPlaceholderTabTitle(tab.title)) {
             return tab.title;
         }
+    }
+    if (_wcsicmp(url.c_str(), L"about:blank") == 0) return L"空白页";
+    const size_t scheme = url.find(L"://");
+    if (scheme != std::wstring::npos) {
+        const size_t hostStart = scheme + 3;
+        const size_t hostEnd = url.find_first_of(L"/?#", hostStart);
+        const std::wstring host = url.substr(hostStart, hostEnd - hostStart);
+        if (!host.empty()) return host;
     }
     return L"正在加载…";
 }
@@ -1369,6 +1451,11 @@ void Application::ShowBookmarkMenu() {
 
 void Application::NavigateTo(const std::wstring& url, bool concealUntilContent) {
     const std::wstring normalized = NormalizeInputUrl(url);
+    if (!IsSupportedWebNavigationUrl(normalized)) {
+        MessageBoxW(mainWindow_, L"仅支持 http、https、file 和 about:blank 地址。",
+                    L"无法打开地址", MB_OK | MB_ICONWARNING);
+        return;
+    }
     UpdateCurrentTabUrl(normalized);
     if (webView_) {
         if (concealUntilContent) {
@@ -1377,22 +1464,33 @@ void Application::NavigateTo(const std::wstring& url, bool concealUntilContent) 
                 windowModes_.LeaveWebFullscreen();
             }
             webView_->Stop();
-            waitingForTabContent_ = true;
-            waitingNavigationId_ = 0;
-            if (webViewController_) webViewController_->put_IsVisible(FALSE);
-            InvalidateRect(mainWindow_, nullptr, TRUE);
-            UpdateWindow(mainWindow_);
+            BeginContentWait();
         }
         const HRESULT result = webView_->Navigate(normalized.c_str());
         if (FAILED(result)) {
-            waitingForTabContent_ = false;
-            waitingNavigationId_ = 0;
-            if (webViewController_ && !windowModes_.IsHidden()) {
-                webViewController_->put_IsVisible(TRUE);
-            }
+            EndContentWait();
             ShowError(L"导航失败", L"无法打开该地址。", result);
         }
     }
+}
+
+void Application::BeginContentWait() {
+    waitingForTabContent_ = true;
+    waitingNavigationId_ = 0;
+    contentWaitStartedAt_ = GetTickCount64();
+    if (webViewController_) webViewController_->put_IsVisible(FALSE);
+    SetTimer(mainWindow_, kContentWaitTimerId, 15000, nullptr);
+    InvalidateRect(mainWindow_, nullptr, TRUE);
+}
+
+void Application::EndContentWait() {
+    if (mainWindow_) KillTimer(mainWindow_, kContentWaitTimerId);
+    const bool wasWaiting = waitingForTabContent_;
+    waitingForTabContent_ = false;
+    waitingNavigationId_ = 0;
+    contentWaitStartedAt_ = 0;
+    if (webViewController_ && !windowModes_.IsHidden()) webViewController_->put_IsVisible(TRUE);
+    if (wasWaiting && mainWindow_) InvalidateRect(mainWindow_, nullptr, FALSE);
 }
 
 void Application::ToggleHidden() {
@@ -1424,9 +1522,51 @@ void Application::SetHidden(bool hidden) {
 
 void Application::ToggleImmersion() {
     hotkeys_.CancelActiveGesture();
+    const bool entering = !windowModes_.IsImmersive();
     windowModes_.ToggleImmersion();
     state_.immersionActive = windowModes_.IsImmersive();
+    hotkeys_.SetImmersiveWebFullscreen(
+        windowModes_.IsImmersive() && windowModes_.IsWebFullscreen());
+    if (entering && windowModes_.IsImmersive()) {
+        TransferFocusAwayFromApplication();
+        // Entering immersion removes activation from the host. Re-evaluate the
+        // input guard now so a formerly focused address bar cannot leave the
+        // immersion/show hotkeys unregistered until the fallback timer fires.
+        inputGuard_.Refresh();
+    }
     RefreshOpacityControls();
+}
+
+void Application::TransferFocusAwayFromApplication() {
+    if (!mainWindow_) return;
+    const DWORD currentProcessId = GetCurrentProcessId();
+    if (const HWND foreground = GetForegroundWindow()) {
+        DWORD foregroundProcessId = 0;
+        GetWindowThreadProcessId(foreground, &foregroundProcessId);
+        if (foregroundProcessId != currentProcessId) return;
+    }
+    HWND candidate = GetWindow(mainWindow_, GW_HWNDNEXT);
+    while (candidate) {
+        DWORD processId = 0;
+        GetWindowThreadProcessId(candidate, &processId);
+        const LONG_PTR exStyle = GetWindowLongPtrW(candidate, GWL_EXSTYLE);
+        DWORD cloaked = 0;
+        const bool isCloaked = SUCCEEDED(DwmGetWindowAttribute(
+            candidate, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked != 0;
+        wchar_t className[64]{};
+        GetClassNameW(candidate, className, static_cast<int>(std::size(className)));
+        const bool shellSurface = _wcsicmp(className, L"Progman") == 0 ||
+            _wcsicmp(className, L"WorkerW") == 0 ||
+            _wcsicmp(className, L"Shell_TrayWnd") == 0;
+        if (processId != currentProcessId && IsWindowVisible(candidate) &&
+            IsWindowEnabled(candidate) && !IsIconic(candidate) &&
+            (exStyle & WS_EX_TOOLWINDOW) == 0 && !isCloaked && !shellSurface &&
+            GetWindow(candidate, GW_OWNER) == nullptr) {
+            if (SetForegroundWindow(candidate)) return;
+        }
+        candidate = GetWindow(candidate, GW_HWNDNEXT);
+    }
+    SetFocus(nullptr);
 }
 
 void Application::MinimizeWindow() {
@@ -1438,7 +1578,30 @@ void Application::RefreshHotkeys() {
     const bool suppressed = captureAction_.has_value() ||
         (state_.settings.disableHotkeysOnTyping && inputGuard_.IsTyping());
     hotkeys_.Refresh(windowModes_.IsHidden(), state_.settings.backgroundMediaHotkeys, suppressed);
-    if (!hotkeys_.RegistrationErrors().empty()) PostMessageW(mainWindow_, kShowRegistrationErrors, 0, 0);
+    if (hotkeys_.RegistrationErrors().empty()) {
+        KillTimer(mainWindow_, kHotkeyRegistrationRetryTimerId);
+        currentHotkeyErrorSignature_.clear();
+        hotkeyErrorFirstSeenAt_ = 0;
+        lastShownHotkeyErrorSignature_.clear();
+        return;
+    }
+    std::wstring signature;
+    for (const std::wstring& error : hotkeys_.RegistrationErrors()) signature += error + L"\n";
+    const ULONGLONG now = GetTickCount64();
+    if (signature != currentHotkeyErrorSignature_) {
+        currentHotkeyErrorSignature_ = signature;
+        hotkeyErrorFirstSeenAt_ = now;
+        SetTimer(mainWindow_, kHotkeyRegistrationRetryTimerId, 500, nullptr);
+        return;
+    }
+    if (now - hotkeyErrorFirstSeenAt_ < 900) {
+        SetTimer(mainWindow_, kHotkeyRegistrationRetryTimerId, 500, nullptr);
+        return;
+    }
+    if (signature != lastShownHotkeyErrorSignature_) {
+        lastShownHotkeyErrorSignature_ = std::move(signature);
+        PostMessageW(mainWindow_, kShowRegistrationErrors, 0, 0);
+    }
 }
 
 void Application::ShowHotkeyErrors() {
@@ -1627,6 +1790,12 @@ void Application::CreateSettingsControls(HWND window) {
         settingsControls_.hotkeys[index] = CreateThemedButton(
             window, L"", SettingsHotkeyBase + static_cast<int>(index));
         MoveWindow(settingsControls_.hotkeys[index], fieldX, y, Scale(270), Scale(29), FALSE);
+        settingsControls_.hotkeyEnabled[index] = CreateWindowExW(0, L"BUTTON", L"启用",
+            WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+            fieldX + Scale(286), y, Scale(100), Scale(29), window,
+            reinterpret_cast<HMENU>(static_cast<INT_PTR>(
+                SettingsHotkeyEnabledBase + static_cast<int>(index))), instance_, nullptr);
+        SetControlFont(settingsControls_.hotkeyEnabled[index]);
         y += Scale(33);
     }
     y += Scale(12);
@@ -1707,6 +1876,7 @@ void Application::ReadSettingsControls() {
     }
     if (old.disableHotkeysOnTyping != state_.settings.disableHotkeysOnTyping ||
         old.backgroundMediaHotkeys != state_.settings.backgroundMediaHotkeys) {
+        inputGuard_.SetEnabled(state_.settings.disableHotkeysOnTyping);
         RefreshHotkeys();
     }
     if (!old.autoFitVideoFullscreen && state_.settings.autoFitVideoFullscreen &&
@@ -1737,6 +1907,7 @@ void Application::RefreshSettingsControls() {
     SelectComboValue(settingsControls_.theme, static_cast<int>(state_.settings.themeMode));
     for (size_t index = 0; index < kHotkeyCount; ++index) {
         SetWindowTextW(settingsControls_.hotkeys[index], HotkeyDisplayText(state_.hotkeys[index]).c_str());
+        SetCheck(settingsControls_.hotkeyEnabled[index], state_.hotkeys[index].enabled);
     }
     updatingSettingsControls_ = false;
     RefreshOpacityControls();
@@ -1849,13 +2020,24 @@ LRESULT Application::HandleSettingsMessage(HWND window, UINT message, WPARAM wPa
             BeginHotkeyCapture(static_cast<HotkeyAction>(id - SettingsHotkeyBase));
             return 0;
         }
+        if (id >= SettingsHotkeyEnabledBase &&
+            id < SettingsHotkeyEnabledBase + static_cast<int>(kHotkeyCount)) {
+            if (HIWORD(wParam) == BN_CLICKED) {
+                CancelHotkeyCapture();
+                const size_t index = static_cast<size_t>(id - SettingsHotkeyEnabledBase);
+                state_.hotkeys[index].enabled = IsChecked(settingsControls_.hotkeyEnabled[index]);
+                RefreshHotkeys();
+                SaveConfiguration();
+            }
+            return 0;
+        }
         if (id == SettingsDiagnostics) {
             RequestMediaDiagnostics();
             return 0;
         }
         if (id == SettingsAbout) {
             MessageBoxW(window,
-                L"小窗浏览器 v1.4.2\n\n"
+                L"小窗浏览器 v1.4.3\n\n"
                 L"专为单屏玩家打造的 Windows 画中画浏览器\n"
                 L"C++20 / Win32 / WebView2 1.0.4078.44\n\n"
                 L"https://github.com/azurplain/Mini-Window-Browser",
@@ -2244,6 +2426,7 @@ void Application::ResetToDefaults() {
     state_.settings.themeMode = retainedTheme;
     state_.settings.renderMode = retainedRender;
     state_.hotkeys = DefaultHotkeys();
+    inputGuard_.SetEnabled(state_.settings.disableHotkeysOnTyping);
     RECT rect{100, 100, 1100, 700};
     windowModes_.ApplyPresetGeometry(rect, false);
     RefreshTrayMode(); RefreshHotkeys(); RefreshSettingsControls(); SaveConfiguration();
@@ -2338,6 +2521,9 @@ void Application::ApplyPreset(const Preset& preset) {
     state_.settings.disableHotkeysOnTyping = preset.disableHotkeysOnTyping;
     state_.settings.useSystemTray = preset.useSystemTray;
     state_.settings.backgroundMediaHotkeys = preset.backgroundMediaHotkeys;
+    state_.settings.autoFitVideoFullscreen = preset.autoFitVideoFullscreen;
+    state_.settings.lockVideoFullscreenAspect = preset.lockVideoFullscreenAspect;
+    state_.settings.maximizedTopDragEnabled = preset.maximizedTopDragEnabled;
     state_.settings.immersionStyle = preset.immersionStyle;
     state_.settings.homeUrl = preset.homeUrl;
     state_.settings.themeMode = retainedTheme;
@@ -2358,6 +2544,7 @@ void Application::ApplyPreset(const Preset& preset) {
     } else if (!preset.currentUrl.empty()) {
         NavigateTo(preset.currentUrl);
     }
+    inputGuard_.SetEnabled(state_.settings.disableHotkeysOnTyping);
     RefreshTrayMode(); RefreshHotkeys(); RefreshSettingsControls(); SaveConfiguration();
 }
 
@@ -2375,6 +2562,9 @@ Preset Application::CapturePreset(const std::wstring& name) const {
     preset.disableHotkeysOnTyping = state_.settings.disableHotkeysOnTyping;
     preset.useSystemTray = state_.settings.useSystemTray;
     preset.backgroundMediaHotkeys = state_.settings.backgroundMediaHotkeys;
+    preset.autoFitVideoFullscreen = state_.settings.autoFitVideoFullscreen;
+    preset.lockVideoFullscreenAspect = state_.settings.lockVideoFullscreenAspect;
+    preset.maximizedTopDragEnabled = state_.settings.maximizedTopDragEnabled;
     preset.immersionStyle = state_.settings.immersionStyle;
     preset.homeUrl = state_.settings.homeUrl;
     preset.currentUrl = CurrentUrl();

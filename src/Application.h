@@ -56,6 +56,7 @@ private:
         SettingsMaximizedTopDrag = 2018,
         SettingsLockFullscreenAspect = 2019,
         SettingsHotkeyBase = 2100,
+        SettingsHotkeyEnabledBase = 2200,
 
         BookmarkList = 3001,
         BookmarkTitle = 3002,
@@ -77,13 +78,19 @@ private:
     static constexpr UINT kShowRegistrationErrors = WM_APP + 61;
     static constexpr UINT kCloseTabMessage = WM_APP + 62;
     static constexpr UINT kShowExistingInstance = WM_APP + 63;
+    static constexpr UINT kDeferredNewTabMessage = WM_APP + 67;
+    static constexpr UINT kRecreateWebViewMessage = WM_APP + 68;
 #ifdef XIAOCHUANG_SMOKE_TEST
     static constexpr UINT kSetWebTypingSmokeMessage = WM_APP + 64;
     static constexpr UINT kSetWebFullscreenSmokeMessage = WM_APP + 65;
     static constexpr UINT kGetHotkeyCountSmokeMessage = WM_APP + 66;
+    static constexpr UINT kGetInputTypingSmokeMessage = WM_APP + 69;
 #endif
     static constexpr UINT_PTR kInputFallbackTimerId = 4403;
     static constexpr UINT_PTR kSettingsSaveTimerId = 4404;
+    static constexpr UINT_PTR kInputDebounceTimerId = 4405;
+    static constexpr UINT_PTR kContentWaitTimerId = 4406;
+    static constexpr UINT_PTR kHotkeyRegistrationRetryTimerId = 4407;
     static constexpr int kTrayIconId = 1;
 
     static LRESULT CALLBACK MainWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -119,6 +126,7 @@ private:
     void HandleWebMessage(const std::wstring& message);
     void HandleWebFullscreenChanged();
     void HandleProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND kind);
+    void RecreateWebView();
 
     void CreateNewTab(const std::wstring& url, const std::wstring& title, bool activate);
     void CloseTab(int index);
@@ -139,9 +147,12 @@ private:
     void ToggleCurrentBookmark();
     void ShowBookmarkMenu();
     void NavigateTo(const std::wstring& url, bool concealUntilContent = false);
+    void BeginContentWait();
+    void EndContentWait();
     void ToggleHidden();
     void SetHidden(bool hidden);
     void ToggleImmersion();
+    void TransferFocusAwayFromApplication();
     void MinimizeWindow();
     void RefreshHotkeys();
     void ShowHotkeyErrors();
@@ -214,11 +225,18 @@ private:
     int navigationRowHeight_ = 44;
     int chromeHeight_ = 84;
     bool shuttingDown_ = false;
-    bool navigatingFromTabSwitch_ = false;
     bool webViewReady_ = false;
     bool webTyping_ = false;
+    bool hotkeysStarted_ = false;
+    bool inputGuardStarted_ = false;
+    bool webViewRecoveryPending_ = false;
     bool trayIconAdded_ = false;
     std::wstring webViewVersion_;
+    std::wstring lastShownHotkeyErrorSignature_;
+    std::wstring currentHotkeyErrorSignature_;
+    ULONGLONG hotkeyErrorFirstSeenAt_ = 0;
+    ULONGLONG lastHeartbeatTick_ = 0;
+    ULONGLONG maximumHeartbeatDelay_ = 0;
     std::unordered_map<std::wstring, std::wstring> knownPageTitles_;
     NOTIFYICONDATAW trayData_{};
 
@@ -240,6 +258,8 @@ private:
     EventRegistrationToken webMessageToken_{};
     EventRegistrationToken fullscreenToken_{};
     EventRegistrationToken newWindowToken_{};
+    EventRegistrationToken windowCloseToken_{};
+    EventRegistrationToken downloadToken_{};
     EventRegistrationToken processFailedToken_{};
 
     struct SettingsControls {
@@ -265,6 +285,7 @@ private:
         HWND about = nullptr;
         HWND repository = nullptr;
         std::array<HWND, kHotkeyCount> hotkeys{};
+        std::array<HWND, kHotkeyCount> hotkeyEnabled{};
     } settingsControls_;
     std::optional<HotkeyAction> captureAction_;
 #ifdef XIAOCHUANG_SMOKE_TEST
@@ -273,6 +294,7 @@ private:
     bool updatingSettingsControls_ = false;
     bool waitingForTabContent_ = false;
     UINT64 waitingNavigationId_ = 0;
+    ULONGLONG contentWaitStartedAt_ = 0;
     int settingsScrollPosition_ = 0;
 
     struct BookmarkControls {

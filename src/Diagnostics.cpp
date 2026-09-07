@@ -46,7 +46,7 @@ std::wstring BuildSystemDiagnostics(const AppState& state,
         }
     }
     std::wostringstream output;
-    output << L"Mini Window Browser 1.4.2\r\n"
+    output << L"Mini Window Browser 1.4.3\r\n"
            << L"Windows: " << version.dwMajorVersion << L'.' << version.dwMinorVersion
            << L" build " << version.dwBuildNumber << L"\r\n"
            << L"HAGS: " << HagsState() << L"\r\n"
@@ -81,10 +81,29 @@ std::wstring DecodeExecuteScriptString(const std::wstring& value) {
         case L'\\': decoded.push_back(L'\\'); break;
         case L'"': decoded.push_back(L'"'); break;
         case L'u': {
-            if (index + 4 < value.size()) {
-                wchar_t digits[5]{value[index + 1], value[index + 2], value[index + 3], value[index + 4], 0};
-                decoded.push_back(static_cast<wchar_t>(wcstoul(digits, nullptr, 16)));
+            // The final quote is not part of the four hexadecimal digits. Keep
+            // malformed escapes readable instead of silently turning a partial
+            // value into an unrelated character.
+            const bool hasFourDigits = index + 4 < value.size() - 1;
+            bool valid = hasFourDigits;
+            unsigned int codeUnit = 0;
+            for (size_t offset = 1; valid && offset <= 4; ++offset) {
+                const wchar_t digit = value[index + offset];
+                unsigned int nibble = 0;
+                if (digit >= L'0' && digit <= L'9') nibble = digit - L'0';
+                else if (digit >= L'a' && digit <= L'f') nibble = digit - L'a' + 10U;
+                else if (digit >= L'A' && digit <= L'F') nibble = digit - L'A' + 10U;
+                else valid = false;
+                codeUnit = (codeUnit << 4U) | nibble;
+            }
+            if (valid) {
+                // wchar_t is UTF-16 on Windows. Adjacent high/low surrogate
+                // escapes therefore remain a valid pair when appended in order.
+                decoded.push_back(static_cast<wchar_t>(codeUnit));
                 index += 4;
+            } else {
+                decoded.push_back(L'\\');
+                decoded.push_back(L'u');
             }
             break;
         }

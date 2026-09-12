@@ -134,9 +134,13 @@ int Application::Run(HINSTANCE instance, int showCommand) {
             (message.hwnd == settingsWindow_ || IsChild(settingsWindow_, message.hwnd))) {
             if (HandleHotkeyCaptureKey(static_cast<UINT>(message.wParam))) continue;
         }
-        if (settingsWindow_ && IsDialogMessageW(settingsWindow_, &message)) continue;
-        if (bookmarkWindow_ && IsDialogMessageW(bookmarkWindow_, &message)) continue;
-        if (presetWindow_ && IsDialogMessageW(presetWindow_, &message)) continue;
+        const auto dispatchDialog = [&message](HWND dialog) {
+            return dialog && IsWindowVisible(dialog) &&
+                (message.hwnd == dialog || IsChild(dialog, message.hwnd)) &&
+                IsDialogMessageW(dialog, &message);
+        };
+        if (dispatchDialog(settingsWindow_) || dispatchDialog(bookmarkWindow_) ||
+            dispatchDialog(presetWindow_)) continue;
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
@@ -221,12 +225,7 @@ void Application::Shutdown() {
     inputGuard_.Stop();
     windowModes_.Shutdown();
     RemoveTrayIcon();
-    if (webViewController_) {
-        webViewController_->Close();
-        webViewController_.reset();
-    }
-    webView_.reset();
-    webViewEnvironment_.reset();
+    CloseWebView();
     if (uiFont_) { DeleteObject(uiFont_); uiFont_ = nullptr; }
     if (titleFont_) { DeleteObject(titleFont_); titleFont_ = nullptr; }
     if (largeIcon_) { DestroyIcon(largeIcon_); largeIcon_ = nullptr; }
@@ -674,6 +673,35 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
     case kGetInputTypingSmokeMessage:
         return (inputGuard_.IsTyping() ? 1 : 0) |
             (hotkeys_.IsInputSuppressed() ? 2 : 0);
+    case WM_APP + 70: {
+        if (!webViewReady_ || !webViewController_) return -1;
+        double factor = 0;
+        if (FAILED(webViewController_->get_ZoomFactor(&factor))) return -1;
+        return static_cast<LRESULT>(std::lround(factor * 100));
+    }
+    case WM_APP + 71: {
+        if (!webView_) return -1;
+        wil::com_ptr<ICoreWebView2Settings> settings;
+        BOOL enabled = TRUE;
+        if (FAILED(webView_->get_Settings(&settings)) ||
+            FAILED(settings->get_IsZoomControlEnabled(&enabled))) return -1;
+        return enabled;
+    }
+    case WM_APP + 72:
+        if (wParam) NavigateTo(L"file:///" +
+            (config_.Path().parent_path() / L"zoom-smoke.html").generic_wstring(), true);
+        return webViewReady_ && smokeNavigationComplete_ && !waitingForTabContent_;
+    case WM_APP + 73:
+        RecreateWebView();
+        return 0;
+    case WM_APP + 74:
+        SetFocus(settingsControls_.zoomPercent);
+        SetFocus(settingsControls_.fixedZoom);
+        return state_.settings.fixedWebZoomPercent;
+    case WM_APP + 75:
+        if (settingsWindow_) ShowWindow(settingsWindow_, SW_HIDE);
+        RestoreFromUserAction();
+        return webViewController_ ? webViewController_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC) : E_FAIL;
 #endif
     case WM_CLOSE:
         DestroyWindow(window);
@@ -853,6 +881,8 @@ LRESULT CALLBACK Application::TabSubclassProc(HWND window, UINT message, WPARAM 
 }
 
 void Application::InitializeWebView() {
+    if (shuttingDown_) return;
+    const UINT64 generation = ++webViewGeneration_;
     auto options = Make<CoreWebView2EnvironmentOptions>();
     if (!options) {
         ShowError(L"WebView2 初始化失败", L"无法创建 WebView2 环境选项。");
@@ -864,7 +894,8 @@ void Application::InitializeWebView() {
     const HRESULT result = CreateCoreWebView2EnvironmentWithOptions(
         nullptr, nullptr, options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [this](HRESULT environmentResult, ICoreWebView2Environment* environment) -> HRESULT {
+            [this, generation](HRESULT environmentResult, ICoreWebView2Environment* environment) -> HRESULT {
+                if (shuttingDown_ || generation != webViewGeneration_) return S_OK;
                 if (FAILED(environmentResult) || !environment) {
                     ShowError(L"WebView2 初始化失败",
                               L"请安装或修复 Microsoft Edge WebView2 Runtime。", environmentResult);
@@ -875,10 +906,14 @@ void Application::InitializeWebView() {
                 if (SUCCEEDED(environment->get_BrowserVersionString(&version)) && version) {
                     webViewVersion_ = version.get();
                 }
-                environment->CreateCoreWebView2Controller(
+                const HRESULT creationResult = environment->CreateCoreWebView2Controller(
                     mainWindow_,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                        [this](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
+                        [this, generation](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
+                            if (shuttingDown_ || generation != webViewGeneration_) {
+                                if (controller) controller->Close();
+                                return S_OK;
+                            }
                             if (FAILED(controllerResult) || !controller) {
                                 ShowError(L"WebView2 初始化失败", L"无法创建网页视图。", controllerResult);
                                 return S_OK;
@@ -898,18 +933,35 @@ void Application::InitializeWebView() {
                                 settings->put_IsStatusBarEnabled(FALSE);
                             }
                             ConfigureWebViewEvents();
+                            const HRESULT zoomResult = webZoom_.Attach(controller, webView_.get());
+                            if (FAILED(zoomResult)) {
+                                ShowError(L"网页缩放初始化失败", L"无法监听网页缩放变化。", zoomResult);
+                            }
+                            webZoom_.Configure(state_.settings);
                             ResizeWebView();
-                            webViewController_->put_IsVisible(TRUE);
-                            webView_->AddScriptToExecuteOnDocumentCreated(
+                            webViewController_->put_IsVisible(windowModes_.IsHidden() ? FALSE : TRUE);
+                            const HRESULT scriptResult = webView_->AddScriptToExecuteOnDocumentCreated(
                                 MediaBridge::BootstrapScript(),
                                 Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
-                                    [this](HRESULT, PCWSTR) -> HRESULT {
+                                    [this, generation](HRESULT result, PCWSTR) -> HRESULT {
+                                        if (shuttingDown_ || generation != webViewGeneration_) return S_OK;
+                                        if (FAILED(result)) {
+                                            ShowError(L"媒体控制初始化失败", L"网页仍可浏览，请重启小窗后重试。", result);
+                                        }
                                         webViewReady_ = true;
                                         FinishInitialNavigation();
                                         return S_OK;
                                     }).Get());
+                            if (FAILED(scriptResult)) {
+                                ShowError(L"媒体控制初始化失败", L"网页仍可浏览，请重启小窗后重试。", scriptResult);
+                                webViewReady_ = true;
+                                FinishInitialNavigation();
+                            }
                             return S_OK;
                         }).Get());
+                if (FAILED(creationResult)) {
+                    ShowError(L"WebView2 初始化失败", L"无法创建网页视图。", creationResult);
+                }
                 return S_OK;
             }).Get());
     if (FAILED(result)) {
@@ -922,6 +974,9 @@ void Application::ConfigureWebViewEvents() {
     webView_->add_NavigationStarting(
         Callback<ICoreWebView2NavigationStartingEventHandler>(
             [this](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT {
+#ifdef XIAOCHUANG_SMOKE_TEST
+                smokeNavigationComplete_ = false;
+#endif
                 hotkeys_.CancelActiveGesture();
                 inputGuard_.SetWebTyping(false);
                 if (waitingForTabContent_ && args) {
@@ -942,6 +997,9 @@ void Application::ConfigureWebViewEvents() {
     webView_->add_NavigationCompleted(
         Callback<ICoreWebView2NavigationCompletedEventHandler>(
             [this](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT {
+#ifdef XIAOCHUANG_SMOKE_TEST
+                smokeNavigationComplete_ = true;
+#endif
                 UINT64 navigationId = 0;
                 if (args) args->get_NavigationId(&navigationId);
                 if (waitingForTabContent_ && waitingNavigationId_ != 0 &&
@@ -1189,13 +1247,31 @@ void Application::HandleProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND kind) {
 void Application::RecreateWebView() {
     if (shuttingDown_) return;
     webViewRecoveryPending_ = false;
+    hotkeys_.CancelActiveGesture();
+    inputGuard_.SetWebTyping(false);
+    webTyping_ = false;
+    windowModes_.LeaveWebFullscreen();
+    hotkeys_.SetImmersiveWebFullscreen(false);
+    CloseWebView();
+    InvalidateRect(mainWindow_, nullptr, TRUE);
+    InitializeWebView();
+}
+
+void Application::CloseWebView() {
+#ifdef XIAOCHUANG_SMOKE_TEST
+    smokeNavigationComplete_ = false;
+#endif
+    ++webViewGeneration_;
+    if (mainWindow_) KillTimer(mainWindow_, kContentWaitTimerId);
+    waitingForTabContent_ = false;
+    waitingNavigationId_ = 0;
+    contentWaitStartedAt_ = 0;
+    webZoom_.Detach();
     if (webViewController_) webViewController_->Close();
     webView_.reset();
     webViewController_.reset();
     webViewEnvironment_.reset();
     webViewReady_ = false;
-    InvalidateRect(mainWindow_, nullptr, TRUE);
-    InitializeWebView();
 }
 
 void Application::CreateNewTab(const std::wstring& url, const std::wstring& title, bool activate) {
@@ -1743,6 +1819,17 @@ void Application::CreateSettingsControls(HWND window) {
     y += Scale(30);
     settingsControls_.autoPause = checkbox(L"隐藏窗口时自动暂停视频", SettingsAutoPause, y);
     y += Scale(30);
+    settingsControls_.fixedZoom = checkbox(L"固定网页缩放比例", SettingsFixedZoom, y);
+    y += Scale(30);
+    label(L"网页缩放（%）", y);
+    settingsControls_.zoomPercent = edit(SettingsZoomPercent, y, Scale(90));
+    SendMessageW(settingsControls_.zoomPercent, EM_SETLIMITTEXT, 3, 0);
+    HWND zoomNote = CreateLabel(window, L"25–500%，默认 100%；启用后保持该比例");
+    MoveWindow(zoomNote, fieldX + Scale(102), y + Scale(4), Scale(390), Scale(26), FALSE);
+    y += row;
+    HWND zoomRefreshNote = CreateLabel(window, L"取消固定后，刷新网页恢复手动缩放；不会自动刷新以免打断播放。");
+    MoveWindow(zoomRefreshNote, left, y, Scale(650), Scale(28), FALSE);
+    y += Scale(32);
     settingsControls_.autoFitFullscreen = checkbox(
         L"网页视频全屏时自动按画面比例调整小窗大小", SettingsAutoFitFullscreen, y);
     y += Scale(30);
@@ -1841,10 +1928,15 @@ void Application::CreateSettingsControls(HWND window) {
 
 void Application::ReadSettingsControls() {
     if (!settingsWindow_ || updatingSettingsControls_) return;
+    updatingSettingsControls_ = true;
+    const auto finishUpdate = wil::scope_exit([this] { updatingSettingsControls_ = false; });
     AppSettings old = state_.settings;
     state_.settings.holeRadius = ParseInteger(settingsControls_.radius, old.holeRadius);
     state_.settings.snapThreshold = ParseInteger(settingsControls_.snap, old.snapThreshold);
     state_.settings.autoPauseOnHide = IsChecked(settingsControls_.autoPause);
+    state_.settings.fixedWebZoomEnabled = IsChecked(settingsControls_.fixedZoom);
+    state_.settings.fixedWebZoomPercent = ParseInteger(
+        settingsControls_.zoomPercent, old.fixedWebZoomPercent);
     state_.settings.autoFitVideoFullscreen = IsChecked(settingsControls_.autoFitFullscreen);
     state_.settings.lockVideoFullscreenAspect = IsChecked(settingsControls_.lockFullscreenAspect);
     state_.settings.maximizedTopDragEnabled = IsChecked(settingsControls_.maximizedTopDrag);
@@ -1860,6 +1952,9 @@ void Application::ReadSettingsControls() {
     state_.settings.renderMode = static_cast<RenderMode>(ComboValue(settingsControls_.renderMode));
     state_.settings.themeMode = static_cast<ThemeMode>(ComboValue(settingsControls_.theme));
     state_.settings.Clamp();
+    EnableWindow(settingsControls_.zoomPercent, state_.settings.fixedWebZoomEnabled ? TRUE : FALSE);
+    SetWindowTextW(settingsControls_.zoomPercent,
+        std::to_wstring(state_.settings.fixedWebZoomPercent).c_str());
     EnableWindow(settingsControls_.lockFullscreenAspect,
                  state_.settings.autoFitVideoFullscreen ? TRUE : FALSE);
 
@@ -1884,6 +1979,13 @@ void Application::ReadSettingsControls() {
         HandleWebFullscreenChanged();
     }
     SaveConfiguration();
+    // WebView COM calls may pump new UI messages. Finish native controls and
+    // persistence first so a subsequent edit cannot be overwritten by this one.
+    updatingSettingsControls_ = false;
+    if (old.fixedWebZoomEnabled != state_.settings.fixedWebZoomEnabled ||
+        old.fixedWebZoomPercent != state_.settings.fixedWebZoomPercent) {
+        webZoom_.Configure(state_.settings);
+    }
 }
 
 void Application::RefreshSettingsControls() {
@@ -1893,6 +1995,9 @@ void Application::RefreshSettingsControls() {
     SetWindowTextW(settingsControls_.snap, std::to_wstring(state_.settings.snapThreshold).c_str());
     SetWindowTextW(settingsControls_.home, state_.settings.homeUrl.c_str());
     SetCheck(settingsControls_.autoPause, state_.settings.autoPauseOnHide);
+    SetCheck(settingsControls_.fixedZoom, state_.settings.fixedWebZoomEnabled);
+    SetWindowTextW(settingsControls_.zoomPercent, std::to_wstring(state_.settings.fixedWebZoomPercent).c_str());
+    EnableWindow(settingsControls_.zoomPercent, state_.settings.fixedWebZoomEnabled ? TRUE : FALSE);
     SetCheck(settingsControls_.autoFitFullscreen, state_.settings.autoFitVideoFullscreen);
     SetCheck(settingsControls_.lockFullscreenAspect, state_.settings.lockVideoFullscreenAspect);
     EnableWindow(settingsControls_.lockFullscreenAspect,
@@ -2037,7 +2142,7 @@ LRESULT Application::HandleSettingsMessage(HWND window, UINT message, WPARAM wPa
         }
         if (id == SettingsAbout) {
             MessageBoxW(window,
-                L"小窗浏览器 v1.4.3\n\n"
+                L"小窗浏览器 v1.4.4\n\n"
                 L"专为单屏玩家打造的 Windows 画中画浏览器\n"
                 L"C++20 / Win32 / WebView2 1.0.4078.44\n\n"
                 L"https://github.com/azurplain/Mini-Window-Browser",
@@ -2423,6 +2528,7 @@ void Application::ResetToDefaults() {
     const ThemeMode retainedTheme = state_.settings.themeMode;
     const RenderMode retainedRender = state_.settings.renderMode;
     state_.settings = AppSettings{};
+    webZoom_.Configure(state_.settings);
     state_.settings.themeMode = retainedTheme;
     state_.settings.renderMode = retainedRender;
     state_.hotkeys = DefaultHotkeys();
@@ -2517,6 +2623,8 @@ void Application::ApplyPreset(const Preset& preset) {
     state_.settings.holeOpacityPercent = preset.holeOpacityPercent;
     state_.settings.autoHideOpacityPercent = preset.autoHideOpacityPercent;
     state_.settings.holdPlaybackRate = preset.holdPlaybackRate;
+    state_.settings.fixedWebZoomEnabled = preset.fixedWebZoomEnabled;
+    state_.settings.fixedWebZoomPercent = preset.fixedWebZoomPercent;
     state_.settings.autoPauseOnHide = preset.autoPauseOnHide;
     state_.settings.disableHotkeysOnTyping = preset.disableHotkeysOnTyping;
     state_.settings.useSystemTray = preset.useSystemTray;
@@ -2530,6 +2638,7 @@ void Application::ApplyPreset(const Preset& preset) {
     state_.settings.renderMode = retainedRender;
     state_.settings.Clamp();
     state_.hotkeys = preset.hotkeys;
+    webZoom_.Configure(state_.settings);
     windowModes_.ApplyPresetGeometry(preset.normalRect, preset.maximized);
     if (!preset.tabs.empty()) {
         state_.tabs = preset.tabs;
@@ -2558,6 +2667,8 @@ Preset Application::CapturePreset(const std::wstring& name) const {
     preset.holeOpacityPercent = state_.settings.holeOpacityPercent;
     preset.autoHideOpacityPercent = state_.settings.autoHideOpacityPercent;
     preset.holdPlaybackRate = state_.settings.holdPlaybackRate;
+    preset.fixedWebZoomEnabled = state_.settings.fixedWebZoomEnabled;
+    preset.fixedWebZoomPercent = state_.settings.fixedWebZoomPercent;
     preset.autoPauseOnHide = state_.settings.autoPauseOnHide;
     preset.disableHotkeysOnTyping = state_.settings.disableHotkeysOnTyping;
     preset.useSystemTray = state_.settings.useSystemTray;

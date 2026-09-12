@@ -1,4 +1,4 @@
-Mini-Window-Browser v1.4.3 - Third-party notices
+Mini-Window-Browser v1.4.4 - Third-party notices
 ======================================================
 
 Microsoft Edge WebView2 SDK 1.0.4078.44

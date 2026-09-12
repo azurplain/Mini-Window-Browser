@@ -54,6 +54,10 @@ void TestConfigMigration() {
     Check(state.hotkeys[xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::Immersion)].enabled,
           L"旧版双字段快捷键默认启用");
     Check(state.tabs.size() == 1, L"空旧会话自动生成主页标签");
+    Check(!state.settings.fixedWebZoomEnabled && state.settings.fixedWebZoomPercent == 100,
+          L"旧配置网页缩放默认100且不锁定");
+    Check(xiaochuang::NormalizeInputUrl(L"ABOUT:BLANK") == L"about:blank",
+          L"空白页地址不会误转为搜索");
 
     RECT rect{20, 30, 920, 630};
     Check(store.Save(state, rect, false), L"新配置可保存");
@@ -65,6 +69,8 @@ void TestConfigMigration() {
     reloaded.settings.autoFitVideoFullscreen = true;
     reloaded.settings.lockVideoFullscreenAspect = true;
     reloaded.settings.maximizedTopDragEnabled = true;
+    reloaded.settings.fixedWebZoomEnabled = true;
+    reloaded.settings.fixedWebZoomPercent = 135;
     Check(store.Save(reloaded, rect, false), L"最大化顶部拖动配置可保存");
     xiaochuang::AppState dragSettingReloaded;
     Check(store.Load(dragSettingReloaded) && dragSettingReloaded.settings.maximizedTopDragEnabled,
@@ -72,6 +78,15 @@ void TestConfigMigration() {
     Check(dragSettingReloaded.settings.autoFitVideoFullscreen &&
           dragSettingReloaded.settings.lockVideoFullscreenAspect,
           L"网页全屏自动适配与比例锁定配置往返一致");
+    Check(dragSettingReloaded.settings.fixedWebZoomEnabled &&
+          dragSettingReloaded.settings.fixedWebZoomPercent == 135, L"固定网页缩放配置往返一致");
+    WritePrivateProfileStringW(L"Settings", L"FixedWebZoomPercent", L"0", path.c_str());
+    xiaochuang::AppState zoomRange;
+    store.Load(zoomRange);
+    Check(zoomRange.settings.fixedWebZoomPercent == 25, L"网页缩放下限校验");
+    WritePrivateProfileStringW(L"Settings", L"FixedWebZoomPercent", L"999", path.c_str());
+    store.Load(zoomRange);
+    Check(zoomRange.settings.fixedWebZoomPercent == 500, L"网页缩放上限校验");
 
     const std::array<UINT, xiaochuang::kHotkeyCount> auditKeys = {
         L'1', VK_OEM_3, L'3', L'4', VK_XBUTTON1, VK_XBUTTON2, L'9'};
@@ -112,6 +127,8 @@ void TestConfigMigration() {
     preset.autoFitVideoFullscreen = true;
     preset.lockVideoFullscreenAspect = true;
     preset.maximizedTopDragEnabled = true;
+    preset.fixedWebZoomEnabled = true;
+    preset.fixedWebZoomPercent = 80;
     preset.hotkeys[xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::Next)].enabled = false;
     reloaded.presets = {preset};
     Check(store.Save(reloaded, rect, false), L"多标签预设可保存");
@@ -129,17 +146,26 @@ void TestConfigMigration() {
     Check(!presetReloaded.presets[0].hotkeys[xiaochuang::HotkeyIndex(
               xiaochuang::HotkeyAction::Next)].enabled,
           L"预设保存逐项快捷键启用状态");
+    Check(presetReloaded.presets[0].fixedWebZoomEnabled &&
+          presetReloaded.presets[0].fixedWebZoomPercent == 80, L"预设独立保存网页缩放");
 
     WritePrivateProfileSectionW(L"Presets", nullptr, path.c_str());
     WritePrivateProfileStringW(L"Presets", L"Count", L"1", path.c_str());
     WritePrivateProfileStringW(L"Presets", L"P0_Name", L"旧版预设", path.c_str());
     WritePrivateProfileStringW(L"Presets", L"P0_CurUrl", L"https://example.com/legacy", path.c_str());
+    WritePrivateProfileStringW(L"Hotkeys", L"HideWin", L"0,57,0", path.c_str());
+    WritePrivateProfileStringW(L"Presets", L"P0_HkHide", L"0,57", path.c_str());
     xiaochuang::AppState legacyPresetState;
     Check(store.Load(legacyPresetState), L"旧版单网址预设可迁移");
     Check(legacyPresetState.presets.size() == 1 &&
           legacyPresetState.presets[0].tabs.size() == 1 &&
           legacyPresetState.presets[0].tabs[0].url == L"https://example.com/legacy",
           L"旧版预设迁移为单标签数组");
+    Check(!legacyPresetState.hotkeys[xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::ToggleHidden)].enabled &&
+          legacyPresetState.presets[0].hotkeys[xiaochuang::HotkeyIndex(xiaochuang::HotkeyAction::ToggleHidden)].enabled,
+          L"旧版预设热键不继承当前全局停用状态");
+    Check(!legacyPresetState.presets[0].fixedWebZoomEnabled &&
+          legacyPresetState.presets[0].fixedWebZoomPercent == 100, L"旧版预设缩放默认兼容");
     DeleteFileW(path.c_str());
 }
 

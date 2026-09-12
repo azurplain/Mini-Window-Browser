@@ -237,7 +237,7 @@ void InputGuard::HandleAsyncResult(LPARAM resultPointer) {
     // focused application. Never let that unrelated result suppress the
     // current foreground application's hotkeys.
     if (result->typing) {
-        const HWND foregroundRoot = GetAncestor(foreground, GA_ROOT);
+        const HWND foregroundRoot = foreground ? GetAncestor(foreground, GA_ROOT) : nullptr;
         const HWND automationRoot = result->automationWindow
             ? GetAncestor(result->automationWindow, GA_ROOT) : nullptr;
         const bool matchingWindow = foregroundRoot && automationRoot == foregroundRoot;

@@ -161,6 +161,7 @@
     <ClInclude Include="src\MediaBridge.h" />
     <ClInclude Include="src\ThemeManager.h" />
     <ClInclude Include="src\WindowModeController.h" />
+    <ClInclude Include="src\WebViewZoom.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="小窗.h" />
   </ItemGroup>

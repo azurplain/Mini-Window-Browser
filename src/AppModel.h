@@ -76,6 +76,8 @@ struct AppSettings {
     int holeOpacityPercent = 100;
     int autoHideOpacityPercent = 100;
     int holdPlaybackRate = 3;
+    int fixedWebZoomPercent = 100;
+    bool fixedWebZoomEnabled = false;
     bool autoPauseOnHide = true;
     bool disableHotkeysOnTyping = true;
     bool useSystemTray = false;
@@ -94,6 +96,7 @@ struct AppSettings {
         holeOpacityPercent = std::clamp(holeOpacityPercent, 0, 100);
         autoHideOpacityPercent = std::clamp(autoHideOpacityPercent, 0, 100);
         holdPlaybackRate = std::clamp(holdPlaybackRate, 2, 5);
+        fixedWebZoomPercent = std::clamp(fixedWebZoomPercent, 25, 500);
         if (homeUrl.empty() || homeUrl == L"0") {
             homeUrl = L"https://www.bilibili.com";
         }
@@ -119,6 +122,8 @@ struct Preset {
     int holeOpacityPercent = 100;
     int autoHideOpacityPercent = 100;
     int holdPlaybackRate = 3;
+    int fixedWebZoomPercent = 100;
+    bool fixedWebZoomEnabled = false;
     bool autoPauseOnHide = true;
     bool disableHotkeysOnTyping = true;
     bool useSystemTray = false;

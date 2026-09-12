@@ -58,7 +58,7 @@ void ReadHotkey(const std::filesystem::path& path, const wchar_t* section,
         if (validModifiers && validVirtualKey) {
             binding.modifiers = modifiers;
             binding.virtualKey = virtualKey;
-            if (fields >= 3) binding.enabled = enabled != 0;
+            binding.enabled = fields < 3 || enabled != 0;
         }
     }
 }
@@ -101,6 +101,8 @@ bool ConfigStore::Load(AppState& state) const {
     state.settings.holeOpacityPercent = ReadInt(path_, kSettings, L"HoleOpacityPercent", 100);
     state.settings.autoHideOpacityPercent = ReadInt(path_, kSettings, L"AutoHideOpacityPercent", 100);
     state.settings.holdPlaybackRate = ReadInt(path_, kSettings, L"HoldPlaybackRate", 3);
+    state.settings.fixedWebZoomEnabled = ReadInt(path_, kSettings, L"FixedWebZoomEnabled", 0) != 0;
+    state.settings.fixedWebZoomPercent = ReadInt(path_, kSettings, L"FixedWebZoomPercent", 100);
     state.settings.autoPauseOnHide = ReadInt(path_, kSettings, L"AutoPause", 1) != 0;
     state.settings.disableHotkeysOnTyping = ReadInt(path_, kSettings, L"DisableHkOnTyping", 1) != 0;
     state.settings.useSystemTray = ReadInt(path_, kSettings, L"SystemTray", 0) != 0;
@@ -168,6 +170,9 @@ bool ConfigStore::Load(AppState& state) const {
         preset.holeOpacityPercent = ReadInt(path_, kPresets, prefix + L"HoleOpacity", 100);
         preset.autoHideOpacityPercent = ReadInt(path_, kPresets, prefix + L"AutoHideOpacity", 100);
         preset.holdPlaybackRate = ReadInt(path_, kPresets, prefix + L"HoldRate", 3);
+        preset.fixedWebZoomEnabled = ReadInt(path_, kPresets, prefix + L"FixedWebZoomEnabled", 0) != 0;
+        preset.fixedWebZoomPercent = std::clamp(
+            ReadInt(path_, kPresets, prefix + L"FixedWebZoomPercent", 100), 25, 500);
         preset.autoPauseOnHide = ReadInt(path_, kPresets, prefix + L"Pause", 1) != 0;
         preset.disableHotkeysOnTyping = ReadInt(path_, kPresets, prefix + L"HkTyping", 1) != 0;
         preset.useSystemTray = ReadInt(path_, kPresets, prefix + L"SysTray", 0) != 0;
@@ -224,6 +229,8 @@ bool ConfigStore::Save(const AppState& state, const RECT& normalRect, bool maxim
     WriteInt(transactionPath, kSettings, L"HoleOpacityPercent", settings.holeOpacityPercent);
     WriteInt(transactionPath, kSettings, L"AutoHideOpacityPercent", settings.autoHideOpacityPercent);
     WriteInt(transactionPath, kSettings, L"HoldPlaybackRate", settings.holdPlaybackRate);
+    WriteInt(transactionPath, kSettings, L"FixedWebZoomEnabled", settings.fixedWebZoomEnabled ? 1 : 0);
+    WriteInt(transactionPath, kSettings, L"FixedWebZoomPercent", settings.fixedWebZoomPercent);
     WriteInt(transactionPath, kSettings, L"AutoPause", settings.autoPauseOnHide ? 1 : 0);
     WriteInt(transactionPath, kSettings, L"DisableHkOnTyping", settings.disableHotkeysOnTyping ? 1 : 0);
     WriteInt(transactionPath, kSettings, L"SystemTray", settings.useSystemTray ? 1 : 0);
@@ -298,6 +305,8 @@ bool ConfigStore::Save(const AppState& state, const RECT& normalRect, bool maxim
         WriteInt(transactionPath, kPresets, prefix + L"HoleOpacity", preset.holeOpacityPercent);
         WriteInt(transactionPath, kPresets, prefix + L"AutoHideOpacity", preset.autoHideOpacityPercent);
         WriteInt(transactionPath, kPresets, prefix + L"HoldRate", preset.holdPlaybackRate);
+        WriteInt(transactionPath, kPresets, prefix + L"FixedWebZoomEnabled", preset.fixedWebZoomEnabled ? 1 : 0);
+        WriteInt(transactionPath, kPresets, prefix + L"FixedWebZoomPercent", preset.fixedWebZoomPercent);
         WriteInt(transactionPath, kPresets, prefix + L"Pause", preset.autoPauseOnHide ? 1 : 0);
         WriteInt(transactionPath, kPresets, prefix + L"HkTyping", preset.disableHotkeysOnTyping ? 1 : 0);
         WriteInt(transactionPath, kPresets, prefix + L"SysTray", preset.useSystemTray ? 1 : 0);
@@ -324,6 +333,7 @@ bool ConfigStore::Save(const AppState& state, const RECT& normalRect, bool maxim
 
 std::wstring NormalizeInputUrl(const std::wstring& input) {
     if (input.empty()) return L"https://www.bilibili.com";
+    if (_wcsicmp(input.c_str(), L"about:blank") == 0) return L"about:blank";
     if (input.find(L"://") != std::wstring::npos) return input;
     if (input.find(L' ') == std::wstring::npos && input.find(L'.') != std::wstring::npos) {
         return L"https://" + input;

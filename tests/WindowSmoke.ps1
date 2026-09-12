@@ -15,6 +15,7 @@ New-Item -ItemType Directory -Path $tempRoot | Out-Null
 Copy-Item -LiteralPath (Join-Path $source 'XiaoChuang.exe') -Destination $tempRoot
 Copy-Item -LiteralPath (Join-Path $source 'WebView2Loader.dll') -Destination $tempRoot
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'smoke-config.ini') -Destination (Join-Path $tempRoot 'config.ini')
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'zoom-smoke.html') -Destination $tempRoot
 
 Add-Type @'
 using System;
@@ -80,6 +81,8 @@ public static class XcNative {
     public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder text, int count);
     [DllImport("user32.dll", CharSet=CharSet.Unicode)]
     public static extern bool SetWindowText(IntPtr h, string text);
+    [DllImport("user32.dll", EntryPoint="SendMessageW", CharSet=CharSet.Unicode)]
+    public static extern IntPtr SendText(IntPtr h, uint message, UIntPtr wParam, string text);
     [DllImport("user32.dll", SetLastError=true)]
     public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y,
         int width, int height, uint flags);
@@ -109,6 +112,8 @@ public static class XcNative {
     public static extern bool DeleteObject(IntPtr o);
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extraInfo);
     [DllImport("user32.dll", SetLastError=true)]
     public static extern bool RegisterHotKey(IntPtr h, int id, uint modifiers, uint key);
     [DllImport("user32.dll")]
@@ -119,10 +124,14 @@ public static class XcNative {
     public static extern void keybd_event(byte virtualKey, byte scanCode, uint flags, UIntPtr extraInfo);
     [DllImport("user32.dll")]
     public static extern uint GetDpiForWindow(IntPtr h);
+    [DllImport("user32.dll")]
+    public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("dwmapi.dll")]
     public static extern int DwmGetWindowAttribute(IntPtr h, int attribute, out uint value, int size);
 }
 '@
+
+[void][XcNative]::SetThreadDpiAwarenessContext([IntPtr](-4))
 
 function Wait-Condition([scriptblock]$Condition, [int]$Timeout = 6000) {
     $until = [Environment]::TickCount64 + $Timeout
@@ -184,6 +193,18 @@ function Send-KeyPress([byte]$VirtualKey) {
     [XcNative]::keybd_event($VirtualKey, 0, 0, [UIntPtr]::Zero)
     Start-Sleep -Milliseconds 60
     [XcNative]::keybd_event($VirtualKey, 0, 2, [UIntPtr]::Zero)
+}
+
+function Send-ZoomIn([IntPtr]$Target) {
+    if (-not [XcNative]::IsWindowVisible($Target)) { throw 'Zoom input target is hidden.' }
+    Start-Sleep -Milliseconds 150
+    # Exercise browser zoom through actual Ctrl+plus input in web content.
+    [XcNative]::keybd_event(17, 0x1d, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    [XcNative]::keybd_event(0x6b, 0x4e, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 80
+    [XcNative]::keybd_event(0x6b, 0x4e, 2, [UIntPtr]::Zero)
+    [XcNative]::keybd_event(17, 0x1d, 2, [UIntPtr]::Zero)
 }
 
 function Set-TestForeground([IntPtr]$Target) {
@@ -345,6 +366,57 @@ try {
     }
     $settings = [XcNative]::GetLastActivePopup($window)
     $style = [XcNative]::GetDlgItem($settings, 2003)
+    $zoomToggle = [XcNative]::GetDlgItem($settings, 2020)
+    $zoomEdit = [XcNative]::GetDlgItem($settings, 2021)
+    $results.ZoomDefaultsUnlocked = -not [XcNative]::IsWindowEnabled($zoomEdit)
+    $zoomReady = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -gt 0
+    } 15000
+    [void][XcNative]::SendMessage($zoomToggle, 0x00f1, [UIntPtr]1, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2020, $zoomToggle)
+    Start-Sleep -Milliseconds 300
+    [void][XcNative]::SendText($zoomEdit, 0x000c, [UIntPtr]::Zero, '135')
+    [void][XcNative]::SendMessage($window, 0x804a, [UIntPtr]::Zero, [IntPtr]::Zero)
+    $results.FixedZoomApplied = $zoomReady -and (Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 135
+    }) -and [XcNative]::SendMessage($window, 0x8047, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 0
+    $results.ZoomProbe = "ready=$zoomReady zoom=$([XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero)) controls=$([XcNative]::SendMessage($window, 0x8047, [UIntPtr]::Zero, [IntPtr]::Zero)) config=$((Get-Content -LiteralPath (Join-Path $tempRoot 'config.ini') | Where-Object { $_ -match 'FixedWebZoom' }) -join ';')"
+    [void](Set-TestForeground $window)
+    [void][XcNative]::SendMessage($window, 0x804b, [UIntPtr]::Zero, [IntPtr]::Zero)
+    Send-ZoomIn $window
+    Start-Sleep -Milliseconds 300
+    $results.FixedZoomRejectsChanges = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 135
+    }
+    [void][XcNative]::SendMessage($window, 0x8048, [UIntPtr]1, [IntPtr]::Zero)
+    $results.FixedZoomSurvivesNavigation = (Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8048, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 1
+    }) -and [XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 135
+    [void][XcNative]::SendMessage($window, 0x8049, [UIntPtr]::Zero, [IntPtr]::Zero)
+    $results.FixedZoomSurvivesRecreation = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 135 -and
+        [XcNative]::SendMessage($window, 0x8048, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 1
+    } 15000
+    [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1010, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($zoomToggle, 0x00f1, [UIntPtr]0, [IntPtr]::Zero)
+    [void][XcNative]::SendMessage($settings, 0x111, [UIntPtr]2020, $zoomToggle)
+    # WebView2 applies IsZoomControlEnabled at the next top-level navigation.
+    [void][XcNative]::SendMessage($window, 0x8048, [UIntPtr]1, [IntPtr]::Zero)
+    $results.ZoomUnlockNavigation = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8048, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 1
+    }
+    [void](Set-TestForeground $window)
+    [void][XcNative]::SendMessage($window, 0x804b, [UIntPtr]::Zero, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 300
+    Send-ZoomIn $window
+    $unlockedZoomChanged = Wait-Condition {
+        [XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -gt 135
+    }
+    $results.ZoomUnlockRestoresControls =
+        [XcNative]::SendMessage($window, 0x8047, [UIntPtr]::Zero, [IntPtr]::Zero).ToInt64() -eq 1 -and
+        $unlockedZoomChanged
+    $results.UnlockedZoomProbe = "zoom=$([XcNative]::SendMessage($window, 0x8046, [UIntPtr]::Zero, [IntPtr]::Zero)) controls=$([XcNative]::SendMessage($window, 0x8047, [UIntPtr]::Zero, [IntPtr]::Zero)) visible=$([XcNative]::IsWindowVisible($window)) enabled=$([XcNative]::IsWindowEnabled($window)) foreground=$([XcNative]::GetForegroundWindow()) main=$window"
+    [void][XcNative]::SendMessage($window, 0x111, [UIntPtr]1010, [IntPtr]::Zero)
     $opacity = [XcNative]::GetDlgItem($settings, 2004)
     $autoFit = [XcNative]::GetDlgItem($settings, 2017)
     $lockAspect = [XcNative]::GetDlgItem($settings, 2019)

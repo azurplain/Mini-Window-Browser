@@ -37,6 +37,7 @@
     <ClInclude Include="src\MediaBridge.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="src\ThemeManager.h"><Filter>头文件</Filter></ClInclude>
     <ClInclude Include="src\WindowModeController.h"><Filter>头文件</Filter></ClInclude>
+    <ClInclude Include="src\WebViewZoom.h"><Filter>头文件</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="小窗.rc">

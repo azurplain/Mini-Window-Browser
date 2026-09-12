@@ -75,6 +75,13 @@
 </tr>
 </table>
 
+## v1.4.4 网页缩放与稳定性更新
+
+- 设置新增“固定网页缩放比例”，默认不启用、数值 100%，支持 25%–500%；启用后导航、切换标签和重启保持设定比例。
+- 固定时保持设定比例；原生缩放/捏合开关在下次导航生效，取消固定后刷新网页恢复手动缩放，保留已设定数值。
+- 场景预设保存各自的缩放开关与比例，旧配置自动兼容。
+- 修复旧版预设热键误继承停用状态、空白页被转成搜索，并加固网页视图异步初始化与重建流程。
+
 ## v1.4.3 稳定性更新
 
 - 输入保护的跨程序识别移到独立线程，系统 OSD、通知和其他程序弹窗不再卡住视频、挖孔和热键。
@@ -106,7 +113,7 @@
 
 ### 下载与运行
 
-1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.3-x64.zip`。
+1. 在 [Releases](https://github.com/azurplain/Mini-Window-Browser/releases/latest) 下载 `Mini-Window-Browser-v1.4.4-x64.zip`。
 2. 将压缩包完整解压到普通可写目录，不要只从压缩包内直接运行 EXE。
 3. 保持 `XiaoChuang.exe` 与 `WebView2Loader.dll` 位于同一目录。
 4. 双击 `XiaoChuang.exe`，在 Windows UAC 窗口中选择“是”。

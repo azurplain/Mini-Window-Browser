@@ -6,6 +6,7 @@
 #include "InputGuard.h"
 #include "ThemeManager.h"
 #include "WindowModeController.h"
+#include "WebViewZoom.h"
 
 #include <WebView2.h>
 #include <shellapi.h>
@@ -55,6 +56,8 @@ private:
         SettingsAutoFitFullscreen = 2017,
         SettingsMaximizedTopDrag = 2018,
         SettingsLockFullscreenAspect = 2019,
+        SettingsFixedZoom = 2020,
+        SettingsZoomPercent = 2021,
         SettingsHotkeyBase = 2100,
         SettingsHotkeyEnabledBase = 2200,
 
@@ -127,6 +130,7 @@ private:
     void HandleWebFullscreenChanged();
     void HandleProcessFailure(COREWEBVIEW2_PROCESS_FAILED_KIND kind);
     void RecreateWebView();
+    void CloseWebView();
 
     void CreateNewTab(const std::wstring& url, const std::wstring& title, bool activate);
     void CloseTab(int index);
@@ -230,6 +234,7 @@ private:
     bool hotkeysStarted_ = false;
     bool inputGuardStarted_ = false;
     bool webViewRecoveryPending_ = false;
+    UINT64 webViewGeneration_ = 0;
     bool trayIconAdded_ = false;
     std::wstring webViewVersion_;
     std::wstring lastShownHotkeyErrorSignature_;
@@ -250,6 +255,7 @@ private:
     wil::com_ptr<ICoreWebView2Environment> webViewEnvironment_;
     wil::com_ptr<ICoreWebView2Controller> webViewController_;
     wil::com_ptr<ICoreWebView2> webView_;
+    WebViewZoom webZoom_;
     EventRegistrationToken navigationStartingToken_{};
     EventRegistrationToken navigationCompletedToken_{};
     EventRegistrationToken contentLoadingToken_{};
@@ -273,6 +279,8 @@ private:
         HWND autoPause = nullptr;
         HWND autoFitFullscreen = nullptr;
         HWND lockFullscreenAspect = nullptr;
+        HWND fixedZoom = nullptr;
+        HWND zoomPercent = nullptr;
         HWND maximizedTopDrag = nullptr;
         HWND typing = nullptr;
         HWND tray = nullptr;
@@ -290,6 +298,7 @@ private:
     std::optional<HotkeyAction> captureAction_;
 #ifdef XIAOCHUANG_SMOKE_TEST
     std::array<UINT, kHotkeyCount> smokeHotkeyCounts_{};
+    bool smokeNavigationComplete_ = false;
 #endif
     bool updatingSettingsControls_ = false;
     bool waitingForTabContent_ = false;

@@ -37,8 +37,13 @@ IDI_SMALL               ICON         "assets\\XiaoChuang.ico"
 //
 
 VS_VERSION_INFO VERSIONINFO
+#ifdef XIAOCHUANG_EXTENSION_LAB
+ FILEVERSION 1,4,6,0
+ PRODUCTVERSION 1,4,6,0
+#else
  FILEVERSION 1,4,5,0
  PRODUCTVERSION 1,4,5,0
+#endif
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS 0x1L
@@ -54,13 +59,24 @@ BEGIN
         BLOCK "080404b0"
         BEGIN
             VALUE "CompanyName", "AzurPlain\0"
+#ifdef XIAOCHUANG_EXTENSION_LAB
+            VALUE "FileDescription", "小窗浏览器 - 扩展实验版\0"
+            VALUE "FileVersion", "1.4.6.0\0"
+#else
             VALUE "FileDescription", "小窗浏览器 - Windows 画中画浏览器\0"
             VALUE "FileVersion", "1.4.5.0\0"
+#endif
             VALUE "InternalName", "XiaoChuang\0"
             VALUE "LegalCopyright", "Copyright (c) 2026 AzurPlain\0"
+#ifdef XIAOCHUANG_EXTENSION_LAB
+            VALUE "OriginalFilename", "XiaoChuang-ExtensionsLab.exe\0"
+            VALUE "ProductName", "小窗浏览器 · 扩展实验版\0"
+            VALUE "ProductVersion", "1.4.6-extensions-lab\0"
+#else
             VALUE "OriginalFilename", "XiaoChuang.exe\0"
             VALUE "ProductName", "小窗浏览器\0"
             VALUE "ProductVersion", "1.4.5\0"
+#endif
         END
     END
     BLOCK "VarFileInfo"

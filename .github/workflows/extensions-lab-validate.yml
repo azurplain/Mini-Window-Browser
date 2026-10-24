@@ -1,0 +1,112 @@
+name: Build and publish isolated extensions lab prerelease
+
+on:
+  push:
+    branches:
+      - experiment/webview2-extensions
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: extensions-lab-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extensions-lab:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+      - name: Restore dependencies
+        shell: pwsh
+        run: |
+          nuget restore '小窗.slnx' -NonInteractive
+          if ($LASTEXITCODE -ne 0) { throw 'Restore failed' }
+      - name: Build non-elevated experimental EXE and core tests
+        shell: pwsh
+        run: |
+          msbuild '小窗.slnx' /t:Rebuild /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:ExtensionLab=true /m /v:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw 'Lab build failed' }
+          if (-not (Test-Path 'x64/Release/XiaoChuang-ExtensionsLab.exe')) { throw 'Lab EXE not produced' }
+          & './x64/Release/XiaoChuang.Tests.exe'
+          if ($LASTEXITCODE -ne 0) { throw 'Core tests failed' }
+      - name: Verify manifest and external manager
+        shell: pwsh
+        run: |
+          $exe = Get-Item 'x64/Release/XiaoChuang-ExtensionsLab.exe'
+          $bytes = [IO.File]::ReadAllBytes($exe.FullName)
+          $text = [Text.Encoding]::Unicode.GetString($bytes)
+          if ($text.Contains('requireAdministrator')) { throw 'Elevated manifest found in lab EXE' }
+          if (-not (Test-Path '扩展管理.cmd')) { throw 'Missing external safe-launch command' }
+          $script = Get-Content -Raw '扩展管理.cmd'
+          if (-not $script.Contains('--extensions-manager')) { throw 'Manager switch missing' }
+          if (-not $script.Contains('%~dp0')) { throw 'Launcher does not locate sibling EXE safely' }
+      - name: Package complete extensions lab ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = 'Mini-Window-Browser-v1.4.6-extensions-lab-x64'
+          $v = (Get-Item 'x64/Release/XiaoChuang-ExtensionsLab.exe').VersionInfo.FileVersion
+          if ($v -ne '1.4.6.0') { throw "Lab resource version mismatch: $v" }
+          New-Item -ItemType Directory -Path $name | Out-Null
+          Copy-Item 'x64/Release/XiaoChuang-ExtensionsLab.exe' $name
+          $loader = Get-ChildItem -Path 'x64/Release','packages/Microsoft.Web.WebView2.1.0.4078.44' -Filter WebView2Loader.dll -Recurse -File | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          if (-not $loader) { throw 'Missing x64 WebView2Loader.dll' }
+          Copy-Item $loader.FullName $name
+          Copy-Item '扩展管理.cmd' $name
+          Copy-Item 'docs/扩展实验版使用说明.md' (Join-Path $name 'README-扩展实验版使用说明.md')
+          foreach ($txt in @(
+            '开启鼠标穿透和隐藏标题栏按0.txt',
+            '小窗吸附后按住Ctrl拖动.txt',
+            '长时间白屏时右键标签页重载.txt')) {
+            if ((Get-Item $txt).Length -ne 0) { throw "Nonempty reminder: $txt" }
+            Copy-Item $txt $name
+          }
+          Copy-Item 'LICENSE.txt' $name
+          Copy-Item 'THIRD_PARTY_NOTICES.txt' $name
+          New-Item -ItemType Directory -Path (Join-Path $name 'licenses') | Out-Null
+          Copy-Item 'packages/Microsoft.Web.WebView2.1.0.4078.44/LICENSE.txt' (Join-Path $name 'licenses/WebView2-SDK-LICENSE.txt')
+          Copy-Item 'packages/Microsoft.Web.WebView2.1.0.4078.44/NOTICE.txt' (Join-Path $name 'licenses/WebView2-SDK-NOTICE.txt')
+          Copy-Item 'packages/Microsoft.Windows.ImplementationLibrary.1.0.250325.1/LICENSE' (Join-Path $name 'licenses/WIL-LICENSE.txt')
+          Copy-Item 'packages/Microsoft.Windows.ImplementationLibrary.1.0.250325.1/ThirdPartyNotices.txt' (Join-Path $name 'licenses/WIL-ThirdPartyNotices.txt')
+          $expected = @('XiaoChuang-ExtensionsLab.exe','WebView2Loader.dll','扩展管理.cmd',
+            'README-扩展实验版使用说明.md','开启鼠标穿透和隐藏标题栏按0.txt',
+            '小窗吸附后按住Ctrl拖动.txt','长时间白屏时右键标签页重载.txt',
+            'LICENSE.txt','THIRD_PARTY_NOTICES.txt','licenses')
+          $actual = @(Get-ChildItem $name | Select-Object -ExpandProperty Name)
+          if ($actual.Count -ne $expected.Count -or @($actual | Where-Object { $_ -notin $expected }).Count) {
+            throw "Unexpected package contents: $($actual -join ', ')"
+          }
+          Compress-Archive -Path $name -DestinationPath "$name.zip"
+          Get-FileHash "$name.zip" -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mini-Window-Browser-v1.4.6-extensions-lab-x64
+          path: Mini-Window-Browser-v1.4.6-extensions-lab-x64.zip
+          if-no-files-found: error
+      - name: Update the single experimental prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = 'v1.4.6-extensions-lab'
+          $zip = 'Mini-Window-Browser-v1.4.6-extensions-lab-x64.zip'
+          $notes = 'RELEASE_NOTES-extensions-lab.md'
+          $existing = gh release view $tag --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git tag -f $tag "${{ github.sha }}"
+            git push --force origin "refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot move extensions lab tag' }
+            gh release upload $tag $zip --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot replace experimental ZIP' }
+            gh release edit $tag --notes-file $notes --prerelease
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot update experimental release notes' }
+          } else {
+            gh release create $tag $zip --target "${{ github.sha }}" --title '小窗浏览器 v1.4.6-extensions-lab｜扩展长期实验版' --notes-file $notes --prerelease
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot publish extensions lab prerelease' }
+          }

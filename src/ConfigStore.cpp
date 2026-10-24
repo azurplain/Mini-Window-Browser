@@ -92,7 +92,15 @@ ConfigStore::ConfigStore(std::filesystem::path overridePath) {
     const DWORD length = GetModuleFileNameW(nullptr, modulePath.data(),
                                             static_cast<DWORD>(modulePath.size()));
     std::filesystem::path executable(length > 0 ? modulePath.data() : L".");
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    // Never open or overwrite the stable release's config or cookies.
+    const auto experimentData = executable.parent_path() / L"extensions-lab-data";
+    std::error_code error;
+    std::filesystem::create_directories(experimentData, error);
+    path_ = experimentData / L"config.ini";
+#else
     path_ = executable.parent_path() / L"config.ini";
+#endif
 }
 
 bool ConfigStore::Load(AppState& state) const {

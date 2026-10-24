@@ -71,6 +71,14 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup Condition="'$(ExtensionLab)'=='true'">
+    <ClCompile>
+      <PreprocessorDefinitions>XIAOCHUANG_EXTENSION_LAB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ResourceCompile>
+      <PreprocessorDefinitions>XIAOCHUANG_EXTENSION_LAB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(SmokeTestAsInvoker)'=='true'">
     <ClCompile>
       <PreprocessorDefinitions>XIAOCHUANG_SMOKE_TEST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -88,8 +96,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true'">AsInvoker</UACExecutionLevel>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true'">RequireAdministrator</UACExecutionLevel>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true' or '$(ExtensionLab)'=='true'">AsInvoker</UACExecutionLevel>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true' and '$(ExtensionLab)'!='true'">RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -107,9 +115,10 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <OutputFile>$(OutDir)XiaoChuang.exe</OutputFile>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true'">AsInvoker</UACExecutionLevel>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true'">RequireAdministrator</UACExecutionLevel>
+      <OutputFile Condition="'$(ExtensionLab)'=='true'">$(OutDir)XiaoChuang-ExtensionsLab.exe</OutputFile>
+      <OutputFile Condition="'$(ExtensionLab)'!='true'">$(OutDir)XiaoChuang.exe</OutputFile>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true' or '$(ExtensionLab)'=='true'">AsInvoker</UACExecutionLevel>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true' and '$(ExtensionLab)'!='true'">RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -124,8 +133,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true'">AsInvoker</UACExecutionLevel>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true'">RequireAdministrator</UACExecutionLevel>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true' or '$(ExtensionLab)'=='true'">AsInvoker</UACExecutionLevel>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true' and '$(ExtensionLab)'!='true'">RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -143,9 +152,10 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <OutputFile>$(OutDir)XiaoChuang.exe</OutputFile>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true'">AsInvoker</UACExecutionLevel>
-      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true'">RequireAdministrator</UACExecutionLevel>
+      <OutputFile Condition="'$(ExtensionLab)'=='true'">$(OutDir)XiaoChuang-ExtensionsLab.exe</OutputFile>
+      <OutputFile Condition="'$(ExtensionLab)'!='true'">$(OutDir)XiaoChuang.exe</OutputFile>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'=='true' or '$(ExtensionLab)'=='true'">AsInvoker</UACExecutionLevel>
+      <UACExecutionLevel Condition="'$(SmokeTestAsInvoker)'!='true' and '$(ExtensionLab)'!='true'">RequireAdministrator</UACExecutionLevel>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

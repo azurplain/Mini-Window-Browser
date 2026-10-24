@@ -21,7 +21,9 @@
 #include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <vector>
 
@@ -41,6 +43,15 @@ constexpr wchar_t kSettingsWindowClass[] = L"XiaoChuangSettingsV14Smoke";
 constexpr wchar_t kBookmarkWindowClass[] = L"XiaoChuangBookmarksV14Smoke";
 constexpr wchar_t kPresetWindowClass[] = L"XiaoChuangPresetsV14Smoke";
 constexpr wchar_t kSingleInstanceName[] = L"MiniWindowBrowser-v1.4-SmokeTest-SingleInstance";
+#elif defined(XIAOCHUANG_EXTENSION_LAB)
+constexpr wchar_t kMainWindowClass[] = L"XiaoChuangExtensionsLabMain";
+constexpr wchar_t kExtensionsManagerHostClass[] = L"XiaoChuangExtensionsLabManagerHost";
+constexpr wchar_t kExtensionsWindowClass[] = L"XiaoChuangExtensionsLabExtensions";
+constexpr wchar_t kManagerMutex[] = L"MiniWindowBrowser-ExtensionsLab-Manager-SingleInstance";
+constexpr wchar_t kSettingsWindowClass[] = L"XiaoChuangExtensionsLabSettings";
+constexpr wchar_t kBookmarkWindowClass[] = L"XiaoChuangExtensionsLabBookmarks";
+constexpr wchar_t kPresetWindowClass[] = L"XiaoChuangExtensionsLabPresets";
+constexpr wchar_t kSingleInstanceName[] = L"MiniWindowBrowser-ExtensionsLab-SingleInstance";
 #else
 constexpr wchar_t kMainWindowClass[] = L"XiaoChuangMainWindowV14";
 constexpr wchar_t kSettingsWindowClass[] = L"XiaoChuangSettingsV14";
@@ -117,6 +128,34 @@ void ApplyThemeToWindowTree(HWND window, bool useDark) {
 } // namespace
 
 int Application::Run(HINSTANCE instance, int showCommand) {
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+        for (int i = 1; i < argc; ++i) {
+            if (_wcsicmp(argv[i], L"--extensions-safe-mode") == 0)
+                extensionSafeMode_ = true;
+            if (_wcsicmp(argv[i], L"--extensions-manager") == 0)
+                extensionManagerOnly_ = true;
+        }
+        LocalFree(argv);
+    }
+    // AsInvoker does not prevent inheriting an elevated token from a parent.
+    // Fail closed: untrusted extensions must never run inside an elevated host.
+    HANDLE token = nullptr;
+    TOKEN_ELEVATION elevation{};
+    DWORD resultSize = 0;
+    const BOOL tokenOpened = OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token);
+    const BOOL tokenRead = tokenOpened &&
+        GetTokenInformation(token, TokenElevation, &elevation, sizeof(elevation), &resultSize);
+    if (token) CloseHandle(token);
+    if (!tokenRead || elevation.TokenIsElevated) {
+        MessageBoxW(nullptr,
+            L"扩展实验版必须以普通用户权限运行。\n请关闭管理员 PowerShell/终端，直接在文件资源管理器中双击启动。\n正式版不受影响。",
+            L"小窗扩展实验版 · 权限保护", MB_OK | MB_ICONWARNING);
+        return 2;
+    }
+#endif
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     if (FAILED(comResult) && comResult != RPC_E_CHANGED_MODE) {
@@ -141,7 +180,11 @@ int Application::Run(HINSTANCE instance, int showCommand) {
                 IsDialogMessageW(dialog, &message);
         };
         if (dispatchDialog(settingsWindow_) || dispatchDialog(bookmarkWindow_) ||
-            dispatchDialog(presetWindow_)) continue;
+            dispatchDialog(presetWindow_)
+#ifdef XIAOCHUANG_EXTENSION_LAB
+            || dispatchDialog(extensionWindow_)
+#endif
+            ) continue;
         TranslateMessage(&message);
         DispatchMessageW(&message);
     }
@@ -152,10 +195,29 @@ int Application::Run(HINSTANCE instance, int showCommand) {
 
 bool Application::Initialize(HINSTANCE instance, int showCommand) {
     instance_ = instance;
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    singleInstanceMutex_ = CreateMutexW(nullptr, TRUE,
+        extensionManagerOnly_ ? kManagerMutex : kSingleInstanceName);
+#else
     singleInstanceMutex_ = CreateMutexW(nullptr, TRUE, kSingleInstanceName);
+#endif
     if (!singleInstanceMutex_) return false;
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (HWND existing = FindWindowW(kMainWindowClass, nullptr)) {
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        if (extensionSafeMode_) {
+            MessageBoxW(nullptr,
+                L"扩展实验版正在运行，安全模式不能附着到原有进程。\n请先退出扩展实验版（必要时从任务管理器结束实验版进程），然后再次双击安全模式启动脚本。\n此操作不会删除扩展或配置。",
+                L"安全模式需要独立启动", MB_OK | MB_ICONWARNING);
+            return false;
+        }
+#endif
+        if (HWND existing = FindWindowW(
+#ifdef XIAOCHUANG_EXTENSION_LAB
+            extensionManagerOnly_ ? kExtensionsManagerHostClass : kMainWindowClass,
+#else
+            kMainWindowClass,
+#endif
+            nullptr)) {
             PostMessageW(existing, kShowExistingInstance, 0, 0);
         }
         return false;
@@ -163,6 +225,10 @@ bool Application::Initialize(HINSTANCE instance, int showCommand) {
 
     config_.Load(state_);
     logs_.SetRetention(state_.settings.autoCleanLogs, state_.settings.logRetentionDays);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    logs_.Write("extensions_lab.start",
+        std::string("safe_mode=") + (extensionSafeMode_ ? "1" : "0"));
+#endif
     logs_.Write("application.start",
         "tabs=" + std::to_string(state_.tabs.size()) +
         " auto_cleanup=" + std::to_string(state_.settings.autoCleanLogs ? 1 : 0) +
@@ -187,8 +253,18 @@ bool Application::Initialize(HINSTANCE instance, int showCommand) {
     smallIcon_ = static_cast<HICON>(LoadImageW(instance_, MAKEINTRESOURCEW(IDI_SMALL), IMAGE_ICON,
                                                 24, 24, LR_DEFAULTCOLOR));
     const RECT initial = state_.session.normalRect;
-    mainWindow_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_APPWINDOW, kMainWindowClass,
-        L"小窗浏览器", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+    mainWindow_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_APPWINDOW,
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        extensionManagerOnly_ ? kExtensionsManagerHostClass : kMainWindowClass,
+#else
+        kMainWindowClass,
+#endif
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        extensionSafeMode_ ? L"小窗扩展实验版 · 安全模式" : L"小窗扩展实验版",
+#else
+        L"小窗浏览器",
+#endif
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         initial.left, initial.top, initial.right - initial.left, initial.bottom - initial.top,
         nullptr, nullptr, instance_, this);
     if (!mainWindow_) {
@@ -198,6 +274,13 @@ bool Application::Initialize(HINSTANCE instance, int showCommand) {
     if (largeIcon_) SendMessageW(mainWindow_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(largeIcon_));
     if (smallIcon_) SendMessageW(mainWindow_, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon_));
 
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    if (extensionManagerOnly_) {
+        InitializeWebView();
+        ShowExtensionsWindow();
+        return true;
+    }
+#endif
     windowModes_.Initialize(mainWindow_, &state_.settings, state_.session.normalRect,
         state_.session.maximized, chromeHeight_,
         [this](bool visible) { ShowChrome(visible); },
@@ -226,7 +309,11 @@ bool Application::Initialize(HINSTANCE instance, int showCommand) {
 
 void Application::Shutdown() {
     if (shuttingDown_) return;
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    if (!extensionManagerOnly_) SaveConfiguration();
+#else
     SaveConfiguration();
+#endif
     logs_.Write("application.shutdown", "tabs=" + std::to_string(state_.tabs.size()));
     shuttingDown_ = true;
     hotkeys_.Stop();
@@ -267,6 +354,13 @@ void Application::RegisterWindowClasses() {
     popupClass.lpszClassName = kPresetWindowClass;
     popupClass.lpfnWndProc = PresetWindowProc;
     RegisterClassExW(&popupClass);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    popupClass.lpszClassName = kExtensionsWindowClass;
+    popupClass.lpfnWndProc = ExtensionsWindowProc;
+    RegisterClassExW(&popupClass);
+    mainClass.lpszClassName = kExtensionsManagerHostClass;
+    RegisterClassExW(&mainClass);
+#endif
 }
 
 void Application::CreateMainControls() {
@@ -290,10 +384,16 @@ void Application::CreateMainControls() {
     bookmarkButton_ = CreateThemedButton(mainWindow_, L"书签", Bookmarks);
     presetButton_ = CreateThemedButton(mainWindow_, L"预设", Presets);
     settingsButton_ = CreateThemedButton(mainWindow_, L"设置", Settings);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    extensionButton_ = CreateThemedButton(mainWindow_, L"🧩", ExtensionsButton);
+#endif
 
     const HWND controls[] = {addressEdit_, tabControl_, goButton_, addTabButton_, minimizeButton_,
         maximizeButton_, closeButton_, starButton_, bookmarkButton_, presetButton_, settingsButton_};
     for (HWND control : controls) SetControlFont(control);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    SetControlFont(extensionButton_);
+#endif
     RebuildTabControl();
 }
 
@@ -344,14 +444,25 @@ void Application::LayoutMainControls() {
             ShowWindow(button, compact ? SW_HIDE : SW_SHOWNA);
         }
         ShowWindow(goButton_, SW_SHOWNA);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        ShowWindow(extensionButton_, SW_SHOWNA);
+#endif
         if (compact) {
             const int compactMargin = Scale(4);
             const int compactGoWidth = Scale(38);
             const int goX = std::max(compactMargin, width - compactMargin - compactGoWidth);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+            MoveWindow(extensionButton_, std::max(compactMargin, goX - Scale(56)),
+                       navigationY + Scale(4), Scale(52), navigationButtonHeight, TRUE);
+#endif
             MoveWindow(goButton_, goX, navigationY + Scale(4), compactGoWidth,
                        navigationButtonHeight, TRUE);
             MoveWindow(addressEdit_, compactMargin, navigationY + Scale(7),
-                       std::max(1, goX - compactMargin - Scale(4)),
+                       std::max(1, goX - compactMargin - Scale(4)
+#ifdef XIAOCHUANG_EXTENSION_LAB
+                            - Scale(56)
+#endif
+                            ),
                        navigationRowHeight_ - Scale(14), TRUE);
         } else {
             int xRight = width - margin;
@@ -365,6 +476,9 @@ void Application::LayoutMainControls() {
             placeRight(presetButton_, textWidth);
             placeRight(bookmarkButton_, textWidth);
             placeRight(starButton_, smallWidth);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+            placeRight(extensionButton_, Scale(58));
+#endif
             placeRight(goButton_, textWidth);
             const int addressWidth = std::max(Scale(120), xRight - margin);
             MoveWindow(addressEdit_, margin + Scale(9), navigationY + Scale(7),
@@ -382,6 +496,9 @@ void Application::ShowChrome(bool visible) {
     for (HWND control : controls) {
         if (control) ShowWindow(control, visible ? SW_SHOWNA : SW_HIDE);
     }
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    if (extensionButton_) ShowWindow(extensionButton_, visible ? SW_SHOWNA : SW_HIDE);
+#endif
 }
 
 void Application::ApplyThemeToAllWindows() {
@@ -475,6 +592,9 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         const HWND controls[] = {addressEdit_, tabControl_, goButton_, addTabButton_, minimizeButton_,
             maximizeButton_, closeButton_, starButton_, bookmarkButton_, presetButton_, settingsButton_};
         for (HWND control : controls) SetControlFont(control);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        SetControlFont(extensionButton_);
+#endif
         LayoutMainControls();
         return 0;
     }
@@ -509,6 +629,9 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         else if (id == Bookmarks) ShowBookmarkMenu();
         else if (id == Presets) ShowPresetWindow();
         else if (id == Settings) ShowSettingsWindow();
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        else if (id == ExtensionsButton) ShowExtensionsWindow();
+#endif
         return 0;
     }
     case WM_NOTIFY: {
@@ -694,6 +817,12 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         return 0;
     }
     case kShowExistingInstance:
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        if (extensionManagerOnly_) {
+            ShowExtensionsWindow();
+            return 0;
+        }
+#endif
         RestoreFromUserAction();
         return 0;
 #ifdef XIAOCHUANG_SMOKE_TEST
@@ -749,7 +878,11 @@ LRESULT Application::HandleMainMessage(HWND window, UINT message, WPARAM wParam,
         return 0;
     case WM_DESTROY:
         KillTimer(window, kInputFallbackTimerId);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        if (!extensionManagerOnly_) SaveConfiguration();
+#else
         SaveConfiguration();
+#endif
         PostQuitMessage(0);
         return 0;
     default:
@@ -921,6 +1054,403 @@ LRESULT CALLBACK Application::TabSubclassProc(HWND window, UINT message, WPARAM 
     return DefSubclassProc(window, message, wParam, lParam);
 }
 
+
+#ifdef XIAOCHUANG_EXTENSION_LAB
+wil::com_ptr<ICoreWebView2Profile7> Application::GetExtensionsProfile() const {
+    if (!webView_ || extensionSafeMode_) return {};
+    wil::com_ptr<ICoreWebView2_13> web13;
+    if (!webView_.try_query_to(&web13) || !web13) return {};
+    wil::com_ptr<ICoreWebView2Profile> base;
+    if (FAILED(web13->get_Profile(&base)) || !base) return {};
+    wil::com_ptr<ICoreWebView2Profile7> profile;
+    base.try_query_to(&profile);
+    return profile;
+}
+
+void Application::ShowExtensionsWindow() {
+    if (extensionWindow_ && IsWindow(extensionWindow_)) {
+        ShowWindow(extensionWindow_, SW_SHOWNORMAL);
+        SetForegroundWindow(extensionWindow_);
+        RefreshExtensions();
+        return;
+    }
+    extensionWindow_ = CreateWindowExW(
+        WS_EX_APPWINDOW, kExtensionsWindowClass,
+        L"浏览器扩展管理 · 小窗扩展实验版",
+        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME | WS_VISIBLE,
+        CW_USEDEFAULT, CW_USEDEFAULT, Scale(700), Scale(470),
+        extensionManagerOnly_ ? nullptr : mainWindow_,
+        nullptr, instance_, this);
+    if (!extensionWindow_) {
+        MessageBoxW(mainWindow_, L"无法创建扩展管理窗口。", L"扩展管理", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    if (largeIcon_) SendMessageW(extensionWindow_, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(largeIcon_));
+    RefreshExtensions();
+    SetForegroundWindow(extensionWindow_);
+}
+
+LRESULT CALLBACK Application::ExtensionsWindowProc(HWND window, UINT msg, WPARAM wp, LPARAM lp) {
+    Application* app = reinterpret_cast<Application*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (msg == WM_NCCREATE) {
+        const auto* cs = reinterpret_cast<const CREATESTRUCTW*>(lp);
+        app = static_cast<Application*>(cs->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app));
+    }
+    return app ? app->HandleExtensionsMessage(window, msg, wp, lp)
+               : DefWindowProcW(window, msg, wp, lp);
+}
+
+LRESULT Application::HandleExtensionsMessage(HWND window, UINT msg, WPARAM wp, LPARAM lp) {
+    switch (msg) {
+    case WM_CREATE: {
+        const DWORD style = WS_CHILD | WS_VISIBLE | WS_TABSTOP;
+        extensionList_ = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+            style | LVS_REPORT | LVS_SINGLESEL | LVS_SHOWSELALWAYS,
+            0, 0, 0, 0, window, reinterpret_cast<HMENU>(ExtensionsList), instance_, nullptr);
+        ListView_SetExtendedListViewStyle(extensionList_,
+            LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_CHECKBOXES);
+        LVCOLUMNW column{};
+        column.mask = LVCF_TEXT | LVCF_WIDTH;
+        column.cx = Scale(340);
+        column.pszText = const_cast<LPWSTR>(L"扩展名称");
+        ListView_InsertColumn(extensionList_, 0, &column);
+        column.cx = Scale(120);
+        column.pszText = const_cast<LPWSTR>(L"状态 · 勾选启用");
+        ListView_InsertColumn(extensionList_, 1, &column);
+        column.cx = Scale(75);
+        column.pszText = const_cast<LPWSTR>(L"操作");
+        ListView_InsertColumn(extensionList_, 2, &column);
+        extensionImport_ = CreateWindowExW(0, L"BUTTON", L"安装本地扩展",
+            style | BS_PUSHBUTTON, 0, 0, 0, 0, window,
+            reinterpret_cast<HMENU>(ExtensionsImport), instance_, nullptr);
+        extensionToggle_ = CreateWindowExW(0, L"BUTTON", L"启用 / 停用",
+            style | BS_PUSHBUTTON, 0, 0, 0, 0, window,
+            reinterpret_cast<HMENU>(ExtensionsToggle), instance_, nullptr);
+        extensionRemove_ = CreateWindowExW(0, L"BUTTON", L"删除",
+            style | BS_PUSHBUTTON, 0, 0, 0, 0, window,
+            reinterpret_cast<HMENU>(ExtensionsRemove), instance_, nullptr);
+        extensionRefresh_ = CreateWindowExW(0, L"BUTTON", L"刷新列表",
+            style | BS_PUSHBUTTON, 0, 0, 0, 0, window,
+            reinterpret_cast<HMENU>(ExtensionsRefresh), instance_, nullptr);
+        SetControlFont(extensionList_);
+        SetControlFont(extensionImport_);
+        SetControlFont(extensionToggle_);
+        SetControlFont(extensionRemove_);
+        SetControlFont(extensionRefresh_);
+        return 0;
+    }
+    case WM_SIZE: {
+        const int width = LOWORD(lp), height = HIWORD(lp);
+        const int m = Scale(12), row = Scale(35), gap = Scale(8);
+        MoveWindow(extensionList_, m, m, std::max(1, width - 2 * m),
+                   std::max(1, height - row - 3 * m), TRUE);
+        int x = m, y = std::max(m, height - row - m);
+        for (const auto& item : std::initializer_list<std::pair<HWND,int>>{
+            {extensionImport_, 150}, {extensionToggle_, 120},
+            {extensionRemove_, 80}, {extensionRefresh_, 95}}) {
+            MoveWindow(item.first, x, y, Scale(item.second), row, TRUE);
+            x += Scale(item.second) + gap;
+        }
+        return 0;
+    }
+    case WM_NOTIFY: {
+        const auto* header = reinterpret_cast<const NMHDR*>(lp);
+        if (!header || header->idFrom != ExtensionsList || extensionUiUpdating_) break;
+        if (header->code == LVN_ITEMCHANGED) {
+            const auto* n = reinterpret_cast<const NMLISTVIEW*>(lp);
+            if (n->iItem >= 0 && static_cast<size_t>(n->iItem) < extensions_.size() &&
+                (n->uChanged & LVIF_STATE) &&
+                ((n->uOldState ^ n->uNewState) & LVIS_STATEIMAGEMASK)) {
+                BOOL actual = FALSE;
+                const auto ext = extensions_[static_cast<size_t>(n->iItem)];
+                if (SUCCEEDED(ext->get_IsEnabled(&actual)) &&
+                    (ListView_GetCheckState(extensionList_, n->iItem) != (actual != FALSE))) {
+                    ListView_SetItemState(extensionList_, n->iItem, LVIS_SELECTED, LVIS_SELECTED);
+                    ToggleExtension();
+                }
+            }
+        } else if (header->code == NM_CLICK) {
+            const auto* hit = reinterpret_cast<const NMITEMACTIVATE*>(lp);
+            if (hit->iItem >= 0 && hit->iSubItem == 2) {
+                ListView_SetItemState(extensionList_, hit->iItem, LVIS_SELECTED, LVIS_SELECTED);
+                RemoveExtension();
+            }
+        }
+        return 0;
+    }
+    case WM_COMMAND:
+        switch (LOWORD(wp)) {
+        case ExtensionsImport: InstallExtension(); return 0;
+        case ExtensionsToggle: ToggleExtension(); return 0;
+        case ExtensionsRemove: RemoveExtension(); return 0;
+        case ExtensionsRefresh: RefreshExtensions(); return 0;
+        }
+        break;
+    case WM_CLOSE: DestroyWindow(window); return 0;
+    case WM_DESTROY:
+        extensionWindow_ = nullptr;
+        extensionList_ = nullptr;
+        extensionToggle_ = nullptr;
+        extensionImport_ = nullptr;
+        extensionRemove_ = nullptr;
+        extensionRefresh_ = nullptr;
+        if (extensionManagerOnly_ && mainWindow_ && IsWindow(mainWindow_))
+            PostMessageW(mainWindow_, WM_CLOSE, 0, 0);
+        return 0;
+    default: break;
+    }
+    return DefWindowProcW(window, msg, wp, lp);
+}
+
+void Application::RefreshExtensions() {
+    if (!extensionWindow_ || !extensionList_ || extensionListPending_ ||
+        extensionActionPending_) return;
+    const auto profile = GetExtensionsProfile();
+    if (!profile) {
+        ListView_DeleteAllItems(extensionList_);
+        extensions_.clear();
+        const wchar_t* message = extensionSafeMode_
+            ? L"安全启动：本次禁用所有扩展。请正常启动以管理扩展。"
+            : L"正在连接 WebView2 扩展 Profile，或当前 Runtime 不支持扩展管理。";
+        LVITEMW item{};
+        item.mask = LVIF_TEXT;
+        item.pszText = const_cast<LPWSTR>(message);
+        ListView_InsertItem(extensionList_, &item);
+        return;
+    }
+    extensionListPending_ = true;
+    const HRESULT hr = profile->GetBrowserExtensions(
+        Callback<ICoreWebView2ProfileGetBrowserExtensionsCompletedHandler>(
+            [this](HRESULT result, ICoreWebView2BrowserExtensionList* list) -> HRESULT {
+                extensionListPending_ = false;
+                if (!extensionList_ || !IsWindow(extensionList_)) return S_OK;
+                if (FAILED(result) || !list) {
+                    logs_.Write("extensions_lab.list_failed",
+                        "hr=" + std::to_string(static_cast<unsigned long>(result)));
+                    MessageBoxW(extensionWindow_, L"读取已安装扩展失败。请检查 WebView2 Runtime 与日志。",
+                                L"扩展管理", MB_OK | MB_ICONWARNING);
+                    return S_OK;
+                }
+                const int chosen = ListView_GetNextItem(extensionList_, -1, LVNI_SELECTED);
+                extensionUiUpdating_ = true;
+                ListView_DeleteAllItems(extensionList_);
+                extensions_.clear();
+                UINT32 count = 0;
+                list->get_Count(&count);
+                for (UINT32 i = 0; i < count; ++i) {
+                    wil::com_ptr<ICoreWebView2BrowserExtension> ext;
+                    if (FAILED(list->GetValueAtIndex(i, &ext)) || !ext) continue;
+                    wil::unique_cotaskmem_string name;
+                    BOOL enabled = FALSE;
+                    ext->get_Name(&name);
+                    ext->get_IsEnabled(&enabled);
+                    std::wstring label = name ? name.get() : L"未命名扩展";
+                    LVITEMW item{};
+                    item.mask = LVIF_TEXT;
+                    item.iItem = static_cast<int>(extensions_.size());
+                    item.pszText = label.data();
+                    const int idx = ListView_InsertItem(extensionList_, &item);
+                    std::wstring state = enabled ? L"已启用" : L"已停用";
+                    ListView_SetItemText(extensionList_, idx, 1, state.data());
+                    std::wstring deleteText = L"删除";
+                    ListView_SetItemText(extensionList_, idx, 2, deleteText.data());
+                    ListView_SetCheckState(extensionList_, idx, enabled != FALSE);
+                    extensions_.push_back(std::move(ext));
+                }
+                if (!extensions_.empty()) {
+                    const int selected = std::clamp(chosen, 0, static_cast<int>(extensions_.size()) - 1);
+                    ListView_SetItemState(extensionList_, selected, LVIS_SELECTED, LVIS_SELECTED);
+                }
+                extensionUiUpdating_ = false;
+                logs_.Write("extensions_lab.list", "count=" + std::to_string(extensions_.size()));
+                return S_OK;
+            }).Get());
+    if (FAILED(hr)) {
+        extensionListPending_ = false;
+        logs_.Write("extensions_lab.list_submit_failed",
+            "hr=" + std::to_string(static_cast<unsigned long>(hr)));
+        MessageBoxW(extensionWindow_, L"无法查询扩展列表。", L"扩展管理", MB_OK | MB_ICONWARNING);
+    }
+}
+
+void Application::InstallExtension() {
+    if (extensionActionPending_ || extensionListPending_) return;
+    auto profile = GetExtensionsProfile();
+    if (!profile) {
+        MessageBoxW(extensionWindow_, L"浏览器扩展 Profile 尚未就绪或处于安全模式。",
+                    L"扩展管理", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    BROWSEINFOW browse{};
+    browse.hwndOwner = extensionWindow_;
+    browse.lpszTitle = L"请选择已解压、包含 manifest.json 的扩展文件夹";
+    browse.ulFlags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE;
+    PIDLIST_ABSOLUTE idl = SHBrowseForFolderW(&browse);
+    if (!idl) return;
+    wchar_t folder[MAX_PATH]{};
+    const BOOL gotPath = SHGetPathFromIDListW(idl, folder);
+    CoTaskMemFree(idl);
+    if (!gotPath) return;
+
+    namespace fs = std::filesystem;
+    fs::path destination;
+    try {
+        const fs::path source(folder);
+        if (!fs::is_directory(source) || fs::is_symlink(fs::symlink_status(source)))
+            throw std::runtime_error("invalid folder");
+        std::ifstream manifest(source / L"manifest.json", std::ios::binary);
+        if (!manifest) throw std::runtime_error("missing manifest");
+        std::string data((std::istreambuf_iterator<char>(manifest)),
+                         std::istreambuf_iterator<char>());
+        if (data.size() > 1024 * 1024 ||
+            !std::regex_search(data, std::regex(R"("manifest_version"\s*:\s*3\s*[,}])")))
+            throw std::runtime_error("not Manifest V3");
+        std::uintmax_t bytes = 0;
+        size_t files = 0;
+        for (const auto& entry : fs::recursive_directory_iterator(source)) {
+            if (fs::is_symlink(entry.symlink_status()) ||
+                ++files > 1000) throw std::runtime_error("unsafe extension tree");
+            if (entry.is_regular_file()) {
+                bytes += entry.file_size();
+                if (bytes > 50ULL * 1024 * 1024) throw std::runtime_error("extension too large");
+            }
+        }
+        if (MessageBoxW(extensionWindow_,
+            L"安装扩展后，它可能读取或修改获授权的网站内容。\n"
+            L"仅安装信任来源的扩展。是否确认导入此文件夹？",
+            L"确认安装扩展", MB_YESNO | MB_ICONWARNING) != IDYES) return;
+        fs::path base = config_.Path().parent_path() / L"installed";
+        fs::create_directories(base);
+        if (fs::is_symlink(fs::symlink_status(base)))
+            throw std::runtime_error("unsafe destination");
+        GUID guid{};
+        if (FAILED(CoCreateGuid(&guid))) throw std::runtime_error("GUID failed");
+        wchar_t unique[40]{};
+        StringFromGUID2(guid, unique, 40);
+        std::wstring name(unique);
+        name.erase(std::remove(name.begin(), name.end(), L'{'), name.end());
+        name.erase(std::remove(name.begin(), name.end(), L'}'), name.end());
+        destination = base / name;
+        fs::copy(source, destination, fs::copy_options::recursive);
+    } catch (...) {
+        if (!destination.empty()) {
+            std::error_code ec;
+            fs::remove_all(destination, ec);
+        }
+        MessageBoxW(extensionWindow_,
+            L"导入失败：请选择包含合法 Manifest V3 配置的解压扩展文件夹。\n"
+            L"拒绝链接、超出限制或无法读取的文件目录。",
+            L"扩展管理", MB_OK | MB_ICONWARNING);
+        return;
+    }
+
+    extensionActionPending_ = true;
+    const HRESULT hr = profile->AddBrowserExtension(destination.c_str(),
+        Callback<ICoreWebView2ProfileAddBrowserExtensionCompletedHandler>(
+            [this, destination](HRESULT result, ICoreWebView2BrowserExtension* ext) -> HRESULT {
+                extensionActionPending_ = false;
+                if (SUCCEEDED(result) && ext) {
+                    wil::unique_cotaskmem_string id;
+                    if (SUCCEEDED(ext->get_Id(&id)) && id) {
+                        const auto inventory = config_.Path().parent_path() / L"extension-sources.ini";
+                        WritePrivateProfileStringW(L"Sources", id.get(),
+                            destination.filename().c_str(), inventory.c_str());
+                    }
+                }
+                logs_.Write(SUCCEEDED(result) ? "extensions_lab.install_ok" : "extensions_lab.install_failed",
+                    "hr=" + std::to_string(static_cast<unsigned long>(result)));
+                if (FAILED(result) || !ext) {
+                    std::error_code ec;
+                    std::filesystem::remove_all(destination, ec);
+                    MessageBoxW(extensionWindow_, L"WebView2 无法安装此扩展。请检查文件与扩展兼容性。",
+                                L"扩展管理", MB_OK | MB_ICONWARNING);
+                }
+                RefreshExtensions();
+                return S_OK;
+            }).Get());
+    if (FAILED(hr)) {
+        extensionActionPending_ = false;
+        std::error_code ec;
+        fs::remove_all(destination, ec);
+        logs_.Write("extensions_lab.install_submit_failed",
+            "hr=" + std::to_string(static_cast<unsigned long>(hr)));
+        MessageBoxW(extensionWindow_, L"扩展安装请求失败。", L"扩展管理", MB_OK | MB_ICONWARNING);
+    }
+}
+
+void Application::ToggleExtension() {
+    if (extensionActionPending_ || extensionListPending_ || !extensionList_) return;
+    const int selected = ListView_GetNextItem(extensionList_, -1, LVNI_SELECTED);
+    if (selected < 0 || static_cast<size_t>(selected) >= extensions_.size()) return;
+    const auto ext = extensions_[static_cast<size_t>(selected)];
+    BOOL enabled = FALSE;
+    if (FAILED(ext->get_IsEnabled(&enabled))) return;
+    extensionActionPending_ = true;
+    const HRESULT hr = ext->Enable(!enabled,
+        Callback<ICoreWebView2BrowserExtensionEnableCompletedHandler>(
+            [this](HRESULT result) -> HRESULT {
+                extensionActionPending_ = false;
+                logs_.Write(SUCCEEDED(result) ? "extensions_lab.toggle_ok" : "extensions_lab.toggle_failed",
+                    "hr=" + std::to_string(static_cast<unsigned long>(result)));
+                if (FAILED(result)) MessageBoxW(extensionWindow_, L"切换扩展状态失败。",
+                    L"扩展管理", MB_OK | MB_ICONWARNING);
+                RefreshExtensions();
+                return S_OK;
+            }).Get());
+    if (FAILED(hr)) {
+        extensionActionPending_ = false;
+        RefreshExtensions();
+    }
+}
+
+void Application::RemoveExtension() {
+    if (extensionActionPending_ || extensionListPending_ || !extensionList_) return;
+    const int selected = ListView_GetNextItem(extensionList_, -1, LVNI_SELECTED);
+    if (selected < 0 || static_cast<size_t>(selected) >= extensions_.size()) return;
+    if (MessageBoxW(extensionWindow_, L"确定从此浏览器 Profile 中删除选中的扩展？",
+                    L"删除扩展", MB_YESNO | MB_ICONQUESTION) != IDYES) return;
+    const auto ext = extensions_[static_cast<size_t>(selected)];
+    wil::unique_cotaskmem_string id;
+    ext->get_Id(&id);
+    const std::wstring extensionId = id ? id.get() : L"";
+    extensionActionPending_ = true;
+    const HRESULT hr = ext->Remove(
+        Callback<ICoreWebView2BrowserExtensionRemoveCompletedHandler>(
+            [this, extensionId](HRESULT result) -> HRESULT {
+                extensionActionPending_ = false;
+                if (SUCCEEDED(result) && !extensionId.empty()) {
+                    const auto inventory = config_.Path().parent_path() / L"extension-sources.ini";
+                    wchar_t stored[128]{};
+                    GetPrivateProfileStringW(L"Sources", extensionId.c_str(), L"",
+                        stored, static_cast<DWORD>(std::size(stored)), inventory.c_str());
+                    const std::wstring folder(stored);
+                    const bool valid = folder.size() == 36 &&
+                        folder.find_first_not_of(L"0123456789abcdefABCDEF-") == std::wstring::npos;
+                    if (valid) {
+                        const auto base = config_.Path().parent_path() / L"installed";
+                        std::error_code error;
+                        if (!std::filesystem::is_symlink(std::filesystem::symlink_status(base, error))) {
+                            std::filesystem::remove_all(base / folder, error);
+                        }
+                    }
+                    WritePrivateProfileStringW(L"Sources", extensionId.c_str(), nullptr,
+                        inventory.c_str());
+                }
+                logs_.Write(SUCCEEDED(result) ? "extensions_lab.remove_ok" : "extensions_lab.remove_failed",
+                    "hr=" + std::to_string(static_cast<unsigned long>(result)));
+                if (FAILED(result)) MessageBoxW(extensionWindow_, L"删除扩展失败。",
+                    L"扩展管理", MB_OK | MB_ICONWARNING);
+                RefreshExtensions();
+                return S_OK;
+            }).Get());
+    if (FAILED(hr)) {
+        extensionActionPending_ = false;
+        RefreshExtensions();
+    }
+}
+#endif // XIAOCHUANG_EXTENSION_LAB
+
 void Application::InitializeWebView() {
     if (shuttingDown_) return;
     const UINT64 generation = ++webViewGeneration_;
@@ -936,8 +1466,38 @@ void Application::InitializeWebView() {
     if (state_.settings.renderMode == RenderMode::SoftwareCompatibility) {
         options->put_AdditionalBrowserArguments(L"--disable-gpu");
     }
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions6> extensionsOptions;
+    const HRESULT optionsHr = options.As(&extensionsOptions);
+    if (FAILED(optionsHr) || !extensionsOptions) {
+        logs_.Write("extensions_lab.options_unavailable",
+            "hr=" + std::to_string(static_cast<unsigned long>(optionsHr)));
+        ShowError(L"扩展实验版启动失败", L"WebView2 SDK 不支持浏览器扩展选项。", optionsHr);
+        return;
+    }
+    // Test-only opt-in in a separate profile; safe mode always overrides it.
+    const bool enabled = !extensionSafeMode_;
+    const HRESULT enabledHr = extensionsOptions->put_AreBrowserExtensionsEnabled(
+        enabled ? TRUE : FALSE);
+    if (FAILED(enabledHr)) {
+        logs_.Write("extensions_lab.enable_failed",
+            "hr=" + std::to_string(static_cast<unsigned long>(enabledHr)));
+        ShowError(L"扩展实验版启动失败", L"无法设置扩展启用状态。", enabledHr);
+        return;
+    }
+    logs_.Write("extensions_lab.environment_options",
+        std::string("safe_mode=") + (extensionSafeMode_ ? "1" : "0") +
+        " extensions_enabled=" + (enabled ? "1" : "0"));
+    const auto labUserData = (config_.Path().parent_path() / L"WebView2").wstring();
+#endif
     const HRESULT result = CreateCoreWebView2EnvironmentWithOptions(
-        nullptr, nullptr, options.Get(),
+        nullptr,
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        labUserData.c_str(),
+#else
+        nullptr,
+#endif
+        options.Get(),
         Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [this, generation](HRESULT environmentResult, ICoreWebView2Environment* environment) -> HRESULT {
                 if (shuttingDown_ || generation != webViewGeneration_) return S_OK;
@@ -986,6 +1546,14 @@ void Application::InitializeWebView() {
                                 settings->put_AreDevToolsEnabled(TRUE);
                                 settings->put_IsStatusBarEnabled(FALSE);
                             }
+#ifdef XIAOCHUANG_EXTENSION_LAB
+                            if (extensionWindow_) RefreshExtensions();
+                            if (extensionManagerOnly_) {
+                                webViewController_->put_IsVisible(FALSE);
+                                ShowExtensionsWindow();
+                                return S_OK;
+                            }
+#endif
                             ConfigureWebViewEvents();
                             const HRESULT zoomResult = webZoom_.Attach(controller, webView_.get());
                             if (FAILED(zoomResult)) {
@@ -1184,6 +1752,9 @@ void Application::ConfigureWebViewEvents() {
 
 void Application::FinishInitialNavigation() {
     if (!webView_) return;
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    if (extensionManagerOnly_) { ShowExtensionsWindow(); return; }
+#endif
     if (state_.tabs.empty()) {
         state_.tabs.push_back({SuggestedTitleForUrl(state_.settings.homeUrl), state_.settings.homeUrl});
     }
@@ -1396,6 +1967,9 @@ void Application::RecreateWebView() {
 
 void Application::CloseWebView() {
     logs_.Write("webview.close", "generation=" + std::to_string(webViewGeneration_));
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    extensions_.clear();
+#endif
 #ifdef XIAOCHUANG_SMOKE_TEST
     smokeNavigationComplete_ = false;
 #endif
@@ -1500,7 +2074,12 @@ void Application::UpdateCurrentTabTitle(const std::wstring& title) {
     std::wstring display = FormatTabTitle(resolvedTitle);
     item.pszText = display.data();
     TabCtrl_SetItem(tabControl_, state_.currentTabIndex, &item);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    SetWindowTextW(mainWindow_, (resolvedTitle +
+        (extensionSafeMode_ ? L" - 小窗扩展实验版 [安全模式]" : L" - 小窗扩展实验版")).c_str());
+#else
     SetWindowTextW(mainWindow_, (resolvedTitle + L" - 小窗浏览器").c_str());
+#endif
 }
 
 void Application::UpdateCurrentTabUrl(const std::wstring& url) {
@@ -2421,7 +3000,11 @@ LRESULT Application::HandleSettingsMessage(HWND window, UINT message, WPARAM wPa
         }
         if (id == SettingsAbout) {
             MessageBoxW(window,
+#ifdef XIAOCHUANG_EXTENSION_LAB
+                L"小窗浏览器 v1.4.6-extensions-lab（实验版）\n\n"
+#else
                 L"小窗浏览器 v1.4.5\n\n"
+#endif
                 L"专为单屏玩家打造的 Windows 画中画浏览器\n"
                 L"C++20 / Win32 / WebView2 1.0.4078.44\n\n"
                 L"https://github.com/azurplain/Mini-Window-Browser",

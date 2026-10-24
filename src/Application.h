@@ -17,6 +17,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace xiaochuang {
 
@@ -37,6 +38,15 @@ private:
         Presets = 1009,
         Settings = 1010,
         Tabs = 1011,
+#ifdef XIAOCHUANG_EXTENSION_LAB
+        ExtensionsButton = 1012,
+        ExtensionsList = 5101,
+        ExtensionsImport = 5102,
+        ExtensionsToggle = 5103,
+        ExtensionsRemove = 5104,
+        ExtensionsRefresh = 5105,
+        ExtensionsClose = 5106,
+#endif
 
         SettingsRadius = 2001,
         SettingsSnap = 2002,
@@ -107,6 +117,16 @@ private:
     static LRESULT CALLBACK SettingsWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK BookmarkWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK PresetWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    static LRESULT CALLBACK ExtensionsWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+    LRESULT HandleExtensionsMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+    void ShowExtensionsWindow();
+    void RefreshExtensions();
+    void InstallExtension();
+    void ToggleExtension();
+    void RemoveExtension();
+    wil::com_ptr<ICoreWebView2Profile7> GetExtensionsProfile() const;
+#endif
     static LRESULT CALLBACK AddressProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK TabSubclassProc(HWND window, UINT message, WPARAM wParam,
                                             LPARAM lParam, UINT_PTR subclassId,
@@ -238,6 +258,21 @@ private:
     int tabRowHeight_ = 40;
     int navigationRowHeight_ = 44;
     int chromeHeight_ = 84;
+#ifdef XIAOCHUANG_EXTENSION_LAB
+    bool extensionSafeMode_ = false;
+    bool extensionManagerOnly_ = false;
+    bool extensionActionPending_ = false;
+    bool extensionListPending_ = false;
+    bool extensionUiUpdating_ = false;
+    HWND extensionWindow_ = nullptr;
+    HWND extensionList_ = nullptr;
+    HWND extensionToggle_ = nullptr;
+    HWND extensionImport_ = nullptr;
+    HWND extensionRemove_ = nullptr;
+    HWND extensionRefresh_ = nullptr;
+    HWND extensionButton_ = nullptr;
+    std::vector<wil::com_ptr<ICoreWebView2BrowserExtension>> extensions_;
+#endif
     bool shuttingDown_ = false;
     bool webViewReady_ = false;
     bool webTyping_ = false;

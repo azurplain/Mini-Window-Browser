@@ -869,6 +869,12 @@ LRESULT CALLBACK Application::AddressProc(HWND window, UINT message, WPARAM wPar
         // character. Navigation already happened on WM_KEYDOWN, so consume it.
         return 0;
     }
+    if ((message == WM_KEYDOWN && (wParam == 'A' || wParam == 'a') && (GetKeyState(VK_CONTROL) & 0x8000) != 0) ||
+        (message == WM_CHAR && wParam == 1)) {
+        SendMessageW(window, EM_SETSEL, 0, -1);
+        SendMessageW(window, EM_SCROLLCARET, 0, 0);
+        return 0;
+    }
     if (message == WM_LBUTTONDBLCLK) {
         SetFocus(window);
         SendMessageW(window, EM_SETSEL, 0, -1);

@@ -100,7 +100,12 @@
 
 默认按 **`0`** 切换沉浸模式，按 **`9`** 隐藏或显示窗口。快捷键可自行修改。
 
-## v1.4.5 正式版更新
+## v1.4.6 正式版更新
+
+- **地址栏 Ctrl+A 全选修复：** 修复原生地址栏不能使用 `Ctrl+A` 全选网址的问题，同时避免可能出现的系统提示音。感谢 [Floatingcloud01](https://github.com/Floatingcloud01) 通过 [PR #27](https://github.com/azurplain/Mini-Window-Browser/pull/27) 提供修复。
+- **兼容旧设置：** 本次仅为快捷键体验修复，原有的窗口布局、场景预设、日志、浏览器数据和 v1.4.5 功能保持不变。
+
+## v1.4.5 主要功能回顾
 
 - **网页异常恢复：** 新标签导航不再主动隐藏共享 WebView2；支持右键手动重建网页视图，以及可调的响应检查等待（3–30 秒，默认 5 秒）。自动检查不是每隔几秒强制刷新。
 - **更顺畅的鼠标挖孔：** 刷新间隔可调（10–100ms，默认 16ms），修复部分不必要的重绘与文字布局遮挡。
@@ -113,7 +118,7 @@
 
 **系统要求：** Windows 10／11（推荐 x64），以及 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
 
-1. 在 **[最新正式版](https://github.com/azurplain/Mini-Window-Browser/releases/latest)** 下载 `Mini-Window-Browser-v1.4.5-x64.zip`。
+1. 在 **[最新正式版](https://github.com/azurplain/Mini-Window-Browser/releases/latest)** 下载 `Mini-Window-Browser-v1.4.6-x64.zip`。
 2. 完整解压到可写目录，确保 `XiaoChuang.exe` 和 `WebView2Loader.dll` 位于同一文件夹。
 3. 双击 `XiaoChuang.exe`，按提示确认 Windows UAC。
 4. 把小窗放到合适的位置，访问网页；按 `0` 体验鼠标穿透，或进入设置调整布局与快捷键。

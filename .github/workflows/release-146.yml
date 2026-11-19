@@ -1,17 +1,17 @@
-name: Validate and publish v1.4.5 stable
+name: Validate and publish v1.4.6 stable
 on:
   push:
     branches:
-      - codex/hole-refresh-watchdog-145-test2
+      - release/v1.4.6-ctrl-a
       - master
   workflow_dispatch:
 
 permissions:
   contents: write
 
-# Never race two builds while replacing the same prerelease asset.
+# Avoid overlapping validations for the same release branch/ref.
 concurrency:
-  group: stable-145-${{ github.ref }}
+  group: stable-146-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -37,8 +37,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $fileVersion = (Get-Item 'x64/Release/XiaoChuang.exe').VersionInfo.FileVersion
-          if ($fileVersion -ne '1.4.5.0') { throw "Expected 1.4.5.0 EXE resource, got $fileVersion" }
-          $root = 'Mini-Window-Browser-v1.4.5-x64'
+          if ($fileVersion -ne '1.4.6.0') { throw "Expected 1.4.6.0 EXE resource, got $fileVersion" }
+          $root = 'Mini-Window-Browser-v1.4.6-x64'
           New-Item -ItemType Directory -Path $root | Out-Null
           Copy-Item 'x64/Release/XiaoChuang.exe' $root
           $loader = Get-ChildItem -Path 'x64/Release','packages/Microsoft.Web.WebView2.1.0.4078.44' -Filter WebView2Loader.dll -Recurse -File | Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
@@ -78,17 +78,17 @@ jobs:
           Get-FileHash "$root.zip" -Algorithm SHA256 | Format-List
       - uses: actions/upload-artifact@v4
         with:
-          name: Mini-Window-Browser-v1.4.5-x64
-          path: Mini-Window-Browser-v1.4.5-x64.zip
+          name: Mini-Window-Browser-v1.4.6-x64
+          path: Mini-Window-Browser-v1.4.6-x64.zip
           if-no-files-found: error
-      - name: Publish official v1.4.5 (master only)
+      - name: Publish official v1.4.6 (master only)
         if: github.ref == 'refs/heads/master'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = '1.4.5'
-          $zip = 'Mini-Window-Browser-v1.4.5-x64.zip'
+          $tag = '1.4.6'
+          $zip = 'Mini-Window-Browser-v1.4.6-x64.zip'
           # Official releases are immutable. A later master push must not
           # silently change its binary or notes.
           $existing = git ls-remote --tags origin "refs/tags/$tag"
@@ -97,5 +97,5 @@ jobs:
             Write-Host "Official $tag tag already exists. Not overwriting the published release."
             exit 0
           }
-          gh release create $tag $zip --target "${{ github.sha }}" --title '小窗浏览器 v1.4.5 正式版' --notes-file 'RELEASE_NOTES-1.4.5.md' --latest
+          gh release create $tag $zip --target "${{ github.sha }}" --title '小窗浏览器 v1.4.6 正式版' --notes-file 'RELEASE_NOTES-1.4.6.md' --latest
           if ($LASTEXITCODE -ne 0) { throw 'Official release creation failed' }

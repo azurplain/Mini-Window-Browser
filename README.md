@@ -179,6 +179,21 @@ msbuild .\小窗.slnx /m /t:Rebuild /p:Configuration=Release /p:Platform=x64
 
 欢迎为日常办公、学习、娱乐和游戏等真实场景提出建议。小窗浏览器会继续围绕**快捷、可控、不妨碍主任务的网页悬浮体验**改进。
 
+## ❤️ 赞赏支持
+
+如果小窗浏览器对你有帮助，欢迎自愿赞赏，支持项目的后续维护与改进。**软件始终免费开源，赞赏完全自愿。**
+
+<table>
+  <tr>
+    <th align="center">支付宝</th>
+    <th align="center">微信赞赏码</th>
+  </tr>
+  <tr>
+    <td align="center"><img src="assets/donations/alipay.jpg" width="260" alt="支付宝收款码"></td>
+    <td align="center"><img src="assets/donations/wechat-reward.png" width="260" alt="微信赞赏码"></td>
+  </tr>
+</table>
+
 ## 开源许可
 
 本项目以 [GNU GPL v3.0](LICENSE.txt) 许可开源。

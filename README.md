@@ -189,10 +189,12 @@ msbuild .\小窗.slnx /m /t:Rebuild /p:Configuration=Release /p:Platform=x64
     <th align="center">微信赞赏码</th>
   </tr>
   <tr>
-    <td align="center"><img src="assets/donations/alipay.jpg" width="260" alt="支付宝收款码"></td>
-    <td align="center"><img src="assets/donations/wechat-reward.png" width="260" alt="微信赞赏码"></td>
+    <td align="center" width="50%"><a href="assets/donations/alipay.jpg"><img src="assets/donations/alipay.jpg" width="260" alt="支付宝收款码"></a></td>
+    <td align="center" width="50%"><a href="assets/donations/wechat-reward.png"><img src="assets/donations/wechat-reward.png" width="260" alt="微信赞赏码"></a></td>
   </tr>
 </table>
+
+点击图片可查看完整原图；手机上可保存原图后，使用对应应用的扫一扫从相册识别。请在支付前自行核对收款信息。
 
 ## 开源许可
 
